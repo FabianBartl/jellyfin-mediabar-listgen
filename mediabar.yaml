@@ -1,0 +1,62 @@
+selection:
+  - name: Thrillers of the 90s
+    disabled: true              # entry can be easily disabled
+    timerange: 22:00 - 03:00    # and it is currently between 22:00 and 3:00, this playlist will be selected
+  
+  - name: Featured              # no condition, so it will be selected if none of the previous conditions are met
+
+  - name: all                   # no condition, but it is not selected because the previous one is already selected
+
+
+playlists:
+  - name: Featured
+    sort_by: Name                             # default: order; possible values: random, order, ProductionYear, Name
+    sort_ascending: true                      # default: true; descending sorting order when false
+    items:
+      type: static
+      ids:
+        - c8d5976a20521b1ec16f9ee194a8af21    # spiderman
+        - 18463206e2ec10d3a8ec9ad532a3226f    # codename uncle
+        - f2aacf8048b6323c1e770a8ef503b118    # babylon berlin
+
+  - name: Thrillers of the 90s
+    sort_by: production_year
+    items:
+      type: dynamic
+      production_year: 1990 - 1999
+      genres: thriller, drama                 # condition is met, if any genre is matched
+      exclude_genres: mystery
+  
+  - name: Mid rated DVDs
+    sort_by: random
+    items:
+      type: dynamic
+      tags: dvd                      # i gave all DVDs this tag in my library
+      community_rating: 6 - 7        # i decided to use always this range syntax, to support very specific conditions
+      critics_rating: 60 - 70        # every condition must be met for any item to be selected, therefore both rating formats must be met
+      limit: 10                      # limit to 10 results
+      exclude_library_ids:
+        - 43cfe12fe7d9d8d21251e0964e0232e2    # exclude series library
+        - deaac6c2087e889a2748c15094342b7e    #         kids library
+      # OR: include (not combinable with exclude)
+      # include_library_ids:
+      #   - 7a2175bccb1f1a94152cbd2b2bae8f6d    # include movies library
+
+  - name: Way to long movies
+    sort_by: name
+    items:
+      type: dynamic
+      runtime: "3:00 -"       # format is HH:MM  (upper or lower range limit can be omitted for range syntax, but the separator must be present)
+  
+  - name: Latest
+    sort_by: creation_date
+    sort_ascending: false
+    items:
+      type: dynamic
+      limit: 10
+
+  - name: all
+    sort_by: random
+    items:
+      type: dynamic           # no filter, so everything is selected
+      limit: 50               # but can be limited
