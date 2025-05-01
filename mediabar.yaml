@@ -1,6 +1,6 @@
 selection:
   - name: Thrillers of the 90s
-    disabled: true              # entry can be easily disabled
+    disabled: false              # entry can be easily disabled
     hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
   
   - name: Featured              # no condition, so it will be selected if none of the previous conditions are met
@@ -22,7 +22,7 @@ playlists:
         - f2aacf8048b6323c1e770a8ef503b118    # babylon berlin
 
   - name: Thrillers of the 90s
-    sort_by: production_year
+    sort_by: ProductionYear
     items:
       type: dynamic
       production_year: 1990 - 1999

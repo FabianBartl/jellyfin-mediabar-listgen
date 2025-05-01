@@ -92,40 +92,50 @@ class RangeFilter:
 
         # match data type: numeric, alphabetic
         # and extract lower and/or upper bound values
-        lower_bound, upper_bound = self.range.split("-")
+        lower_bound, upper_bound = re.split(separator_pattern, self.range)
+        numeric_lower_bound, numeric_upper_bound = re.match(numeric_pattern, lower_bound), re.match(numeric_pattern, upper_bound)
+        alphabetic_lower_bound, alphabetic_upper_bound = re.match(alphabetic_pattern, lower_bound), re.match(alphabetic_pattern, upper_bound)
+        
         if self.__interval_type == "closed":
-            if re.match(numeric_pattern, lower_bound) and re.match(numeric_pattern, upper_bound):
-                self.__data_type = "numeric"
-                self.__lower_bound = float(lower_bound)
-                self.__upper_bound = float(upper_bound)
-            elif re.match(alphabetic_pattern, lower_bound) and re.match(alphabetic_pattern, upper_bound):
-                self.__data_type = "alphabetic"
-                self.__lower_bound = str(lower_bound)
-                self.__upper_bound = str(upper_bound)
+            if numeric_lower_bound:
+                if numeric_upper_bound:
+                    self.__data_type = "numeric"
+                    self.__lower_bound = float(lower_bound)
+                    self.__upper_bound = float(upper_bound)
+                else:
+                    raise TypeError(f"Expected numeric data type for upper bound: {upper_bound}")
+            elif alphabetic_lower_bound:
+                if alphabetic_upper_bound:
+                    self.__data_type = "alphabetic"
+                    self.__lower_bound = str(lower_bound)
+                    self.__upper_bound = str(upper_bound)
+                else:
+                    raise TypeError(f"Expected alphabetic data type for upper bound: {upper_bound}")
             else:
-                raise SyntaxError("Expected same data type numeric or alphabetic for lower bound and upper bound.")
+                raise TypeError(f"Expected same data type numeric or alphabetic for lower bound ({lower_bound}) and upper bound ({upper_bound}).")
+
             # lower bound higher than upper bound is allowed and inverts the condition
             self.__is_inverted = self.__lower_bound > self.__upper_bound
             
         elif self.__interval_type == "left-open":
-            if re.match(numeric_pattern, upper_bound):
+            if numeric_upper_bound:
                 self.__data_type = "numeric"
                 self.__upper_bound = float(upper_bound)
-            elif re.match(alphabetic_pattern, upper_bound):
+            elif alphabetic_upper_bound:
                 self.__data_type = "alphabetic"
                 self.__upper_bound = str(upper_bound)
             else:
-                raise SyntaxError("Expected data type numeric or alphabetic for upper bound.")
+                raise TypeError(f"Expected data type numeric or alphabetic for upper bound: {upper_bound}")
             
         elif self.__interval_type == "right-open":
-            if re.match(numeric_pattern, lower_bound):
+            if numeric_lower_bound:
                 self.__data_type = "numeric"
                 self.__lower_bound = float(lower_bound)
-            elif re.match(alphabetic_pattern, lower_bound):
+            elif alphabetic_lower_bound:
                 self.__data_type = "alphabetic"
                 self.__lower_bound = str(lower_bound)
             else:
-                raise SyntaxError("Expected data type numeric or alphabetic for lower bound.")
+                raise TypeError(f"Expected data type numeric or alphabetic for lower bound: {lower_bound}")
 
     def is_in_range(self, value: Union[int, float, str]) -> bool:
         # ensure data type
@@ -263,9 +273,29 @@ class Conditional:
         return f"{__class__.__name__}(name={self.name.__repr__()}, conditions={self.conditions.__repr__()})"
     
     def is_true(self) -> bool:
-        any_condition_failed = False
-        ... #TODO
-        return not any_condition_failed
+        if self.conditions.get("disabled", False):
+            return False
+        
+        elif hours := self.conditions.get("hours"):         # 24-hour format
+            if not RangeFilter(hours).is_in_range(dt.datetime.now().hour):
+                return False
+        elif weekdays := self.conditions.get("weekdays"):   # from monday=1 to sunday=7
+            if not RangeFilter(weekdays).is_in_range(dt.datetime.now().isoweekday()):
+                return False
+        elif days := self.conditions.get("days"):           # from 1st day of the month up to max 32th day
+            if not RangeFilter(days).is_in_range(dt.datetime.now().day):
+                return False
+        elif weeks := self.conditions.get("weeks"):         # from 1st week of the year up to max 52th week
+            if not RangeFilter(weeks).is_in_range(dt.datetime.now().isocalendar()[1]):
+                return False
+        elif months := self.conditions.get("months"):       # from january=1 to december=12
+            if not RangeFilter(months).is_in_range(dt.datetime.now().month):
+                return False
+        elif years := self.conditions.get("years"):         # from year 1 AD up to year 9999 AD 
+            if not RangeFilter(years).is_in_range(dt.datetime.now().year):
+                return False
+        
+        return True
 
 
 
@@ -406,4 +436,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    test()
+    main()
