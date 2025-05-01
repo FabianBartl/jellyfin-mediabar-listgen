@@ -57,9 +57,30 @@ class Jellyfin:
     def join_url(*urls: str) -> str:
         return re.sub(r"[^\:][\/]\/+", "/", "/".join(urls))
         
-    def get_item_metadata(self, item_id: str) -> dict:
-        # request metadata of a single item
+    def get_item(self, item_id: str) -> dict:
+        # request a single item
         url = self.join_url(self.server_url, "Users", self.user_id, "Items", item_id)
+        response = self.session.get(url)
+        response.raise_for_status()
+        return response.json()
+
+    def get_all_items(self, *, parent_id: Optional[str] = None, sort_by: str = "SortName", sort_ascending: bool = True, item_types: str = "Series,Movies", recursive: bool = True) -> list[dict]:
+        # request all items
+        url = self.join_url(self.server_url, "Users", self.user_id, "Items")
+        params = {
+            "SortBy": sort_by,
+            "SortOrder": "Ascending" if sort_ascending else "Descending",
+            "IncludeItemTypes": item_types,
+            "Recursive": recursive,
+            "ParentId": parent_id,
+        }
+        response = self.session.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_all_libraries(self) -> list[dict]:
+        # request all libraries
+        url = self.join_url(self.server_url, "Library", "VirtualFolders")
         response = self.session.get(url)
         response.raise_for_status()
         return response.json()
@@ -69,12 +90,12 @@ class Jellyfin:
 class RangeFilter:
     def __init__(self, _range: str):
         self.range = _range
-        self.parse_range()
+        self.__parse_range()
     
     def __repr__(self) -> str:
         return f"{__class__.__name__}(_range={self.range.__repr__()})"
 
-    def parse_range(self) -> None:
+    def __parse_range(self) -> None:
         numeric_pattern = r"[0-9]+(\.[0-9]+)?"
         alphabetic_pattern = r"[a-z]+"
         any_pattern = r"[^-]+"
@@ -151,7 +172,7 @@ class RangeFilter:
             if not self.__is_inverted:
                 return self.__lower_bound <= value <= self.__upper_bound
             else:
-                return self.__lower_bound <= value >= self.__upper_bound
+                return self.__lower_bound >= value or value <= self.__upper_bound
         elif self.__interval_type == "left-open":
             return value <= self.__upper_bound
         elif self.__interval_type == "right-open":
@@ -203,7 +224,7 @@ class StaticPlaylist:
         
         # request item metadata from jellyfin one by one
         # not in a single bulk request, otherwise the cache functionality won't work as good
-        items_metadata = [ jellyfin.get_item_metadata(item_id) for item_id in self.item_ids ]
+        items_metadata = [ jellyfin.get_item(item_id) for item_id in self.item_ids ]
 
         # define strict sorting function
         match self.sort_by:
@@ -222,7 +243,7 @@ class StaticPlaylist:
                 
                 case "CriticRating" | "CommunityRating":
                     def sort_func(metadata):
-                        if rating := metadata.get(self.sort_by, ...) is not ...:
+                        if (rating := metadata.get(self.sort_by)) is not None:
                             return float(rating)
                         if self.sort_by == "CriticRating":
                             return float(metadata.get("CommunityRating", 0)) * 10
@@ -231,13 +252,14 @@ class StaticPlaylist:
 
                 case "PremiereDate" | "ProductionYear":
                     def sort_func(metadata):
-                        if dateyear := metadata.get(self.sort_by, ...) is not ...:
+                        if (dateyear := metadata.get(self.sort_by)) is not None:
                             return dateutil.parser.isoparse(dateyear if self.sort_by == "PremiereDate" else f"{dateyear}-01-01")
                         if self.sort_by == "PremiereDate":
                             return dateutil.parser.isoparse(f"{metadata.get('ProductionYear', '0001')}-01-01")
                         elif self.sort_by == "ProductionYear":
                             return dateutil.parser.isoparse(str(metadata.get("PremiereDate", "0001-01-01")))
         
+        # apply the defined sort function
         items_metadata.sort(key=sort_func, reverse=not self.sort_ascending)
         item_ids = [ item["Id"] for item in items_metadata ]
         return item_ids
@@ -257,8 +279,9 @@ class DynamicPlaylist:
 
     def compile(self, jellyfin: Jellyfin) -> StaticPlaylist:
         # create a static playlist based on a variety of filters
+
+
         item_ids = []
-        ... #TODO
         new_playlist = StaticPlaylist(self.name, item_ids, self.sort_by, self.sort_ascending)
         return new_playlist
 
@@ -276,22 +299,22 @@ class Conditional:
         if self.conditions.get("disabled", False):
             return False
         
-        elif hours := self.conditions.get("hours") is not None:         # 24-hour format
+        elif (hours := self.conditions.get("hours")) is not None:         # 24-hour format
             if not RangeFilter(hours).is_in_range(dt.datetime.now().hour):
                 return False
-        elif weekdays := self.conditions.get("weekdays") is not None:   # from monday=1 to sunday=7
+        elif (weekdays := self.conditions.get("weekdays")) is not None:   # from monday=1 to sunday=7
             if not RangeFilter(weekdays).is_in_range(dt.datetime.now().isoweekday()):
                 return False
-        elif days := self.conditions.get("days") is not None:           # from 1st day of the month up to max 31st day
+        elif (days := self.conditions.get("days")) is not None:           # from 1st day of the month up to max 31st day
             if not RangeFilter(days).is_in_range(dt.datetime.now().day):
                 return False
-        elif weeks := self.conditions.get("weeks") is not None:         # from 1st week of the year up to max 52nd week
+        elif (weeks := self.conditions.get("weeks")) is not None:         # from 1st week of the year up to max 52nd week
             if not RangeFilter(weeks).is_in_range(dt.datetime.now().isocalendar()[1]):
                 return False
-        elif months := self.conditions.get("months") is not None:       # from january=1 to december=12
+        elif (months := self.conditions.get("months")) is not None:       # from january=1 to december=12
             if not RangeFilter(months).is_in_range(dt.datetime.now().month):
                 return False
-        elif years := self.conditions.get("years") is not None:         # from year 1 AD up to year 9999 AD 
+        elif (years := self.conditions.get("years")) is not None:         # from year 1 AD up to year 9999 AD 
             if not RangeFilter(years).is_in_range(dt.datetime.now().year):
                 return False
         

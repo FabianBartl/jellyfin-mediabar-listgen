@@ -22,9 +22,10 @@ playlists:
         - f2aacf8048b6323c1e770a8ef503b118    # babylon berlin
 
   - name: Thrillers of the 90s
-    sort_by: ProductionYear
+    sort_by: order
     items:
       type: dynamic
+      limit: 15                               # default: 20
       production_year: 1990 - 1999
       genres: thriller, drama                 # condition is met, if any genre is matched
       exclude_genres: mystery
