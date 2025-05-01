@@ -33,7 +33,7 @@ class Jellyfin:
         self.__authenticate_as_user(username, password)
         
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(app_name='{self.app_name}', app_version='{self.app_version}', server_url='{self.server_url}', username='***', password='***', headers={self.headers})\nuserid='{self.user_id}', token='{self.auth_token}'"
+        return f"{__class__.__name__}(app_name={self.app_name.__repr__()}, app_version={self.app_version.__repr__()}, server_url={self.server_url.__repr__()}, username=***, password=***, headers={self.headers.__repr__()})\nuserid={self.user_id.__repr__()}, token={self.auth_token.__repr__()}"
 
     def __authenticate_as_user(self, username: str, password: str) -> None:
         response = self.session.post(
@@ -65,7 +65,7 @@ class RangeFilter:
         self.parse_range()
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(_range='{self.range}')"
+        return f"{__class__.__name__}(_range={self.range.__repr__()})"
 
     def parse_range(self) -> None:
         numeric_pattern = r"[0-9]+(\.[0-9]+)?"
@@ -147,7 +147,7 @@ class StaticPlaylist:
         self.sort_ascending = sort_ascending
         
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name='{self.name}', item_ids={self.item_ids}, sort_by='{self.sort_by}', sort_ascending={self.sort_ascending})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, item_ids={self.item_ids.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()})"
 
     def sort(self, jellyfin: Jellyfin) -> list[str]:
         item_ids = []
@@ -163,7 +163,7 @@ class DynamicPlaylist:
         self.sort_ascending = sort_ascending
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name='{self.name}', filters={self.filters}, sort_by='{self.sort_by}', sort_ascending={self.sort_ascending})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, filters={self.filters.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()})"
 
     def bake(self, jellyfin: Jellyfin) -> StaticPlaylist:
         item_ids = []
@@ -179,7 +179,7 @@ class Conditional:
         self.conditions = conditions
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name='{self.name}', conditions={self.conditions})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, conditions={self.conditions.__repr__()})"
     
     def is_true(self) -> bool:
         any_condition_failed = False
@@ -191,16 +191,20 @@ class Conditional:
 class MediaBar:
     def __init__(self, *, filename: Path):
         self.logger = logging.getLogger(__class__.__name__)
-        self.parse_file(filename)
+        self.__filename = filename
+        self.__parse_file(filename)
     
-    def parse_file(self, filename: Path) -> None:
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(filename={self.__filename.__repr__()}"
+    
+    def __parse_file(self, filename: Path) -> None:
         with open(filename, "r", encoding="utf-8", errors="replace") as file:
             filedata = yaml.load(file.read(), yaml.Loader)
         
-        self.conditionals = self.parse_selection(filedata["selection"])
-        self.playlists = self.parse_playlists(filedata["playlists"])
+        self.conditionals = self.__parse_selection(filedata["selection"])
+        self.playlists = self.__parse_playlists(filedata["playlists"])
 
-    def parse_selection(self, data: dict) -> list[Conditional]:
+    def __parse_selection(self, data: dict) -> list[Conditional]:
         unique_names = set()
         conditionals = []
         for entry in data:
@@ -214,7 +218,7 @@ class MediaBar:
             conditionals.append(new_conditional)
         return conditionals
 
-    def parse_playlists(self, data: dict) -> list[Union[StaticPlaylist, DynamicPlaylist]]:
+    def __parse_playlists(self, data: dict) -> list[Union[StaticPlaylist, DynamicPlaylist]]:
         unique_names = set()
         playlists = []
         for entry in data:
@@ -278,22 +282,6 @@ class MediaBar:
 
 
 def test() -> None:
-    print(True == RangeFilter("22-3").is_in_range("23"))  
-    print(False == RangeFilter("22-3").is_in_range("4"))
-    
-    print(True == RangeFilter("10-14").is_in_range("11"))
-    print(False == RangeFilter("10-14").is_in_range("9"))
-    
-    print(True == RangeFilter("a-d").is_in_range("b"))
-    print(False == RangeFilter("a-f").is_in_range("q"))
-
-    print(True == RangeFilter("a-").is_in_range("z"))
-    print(False == RangeFilter("-d").is_in_range("q"))
-
-    print(True == RangeFilter("22-").is_in_range("23"))
-    print(False == RangeFilter("22-").is_in_range("1"))
-    return
-    
     mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
     pprint(mediabar.conditionals)
     pprint(mediabar.playlists)
