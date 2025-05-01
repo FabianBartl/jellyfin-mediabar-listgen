@@ -276,22 +276,22 @@ class Conditional:
         if self.conditions.get("disabled", False):
             return False
         
-        elif hours := self.conditions.get("hours"):         # 24-hour format
+        elif hours := self.conditions.get("hours") is not None:         # 24-hour format
             if not RangeFilter(hours).is_in_range(dt.datetime.now().hour):
                 return False
-        elif weekdays := self.conditions.get("weekdays"):   # from monday=1 to sunday=7
+        elif weekdays := self.conditions.get("weekdays") is not None:   # from monday=1 to sunday=7
             if not RangeFilter(weekdays).is_in_range(dt.datetime.now().isoweekday()):
                 return False
-        elif days := self.conditions.get("days"):           # from 1st day of the month up to max 32th day
+        elif days := self.conditions.get("days") is not None:           # from 1st day of the month up to max 31st day
             if not RangeFilter(days).is_in_range(dt.datetime.now().day):
                 return False
-        elif weeks := self.conditions.get("weeks"):         # from 1st week of the year up to max 52th week
+        elif weeks := self.conditions.get("weeks") is not None:         # from 1st week of the year up to max 52nd week
             if not RangeFilter(weeks).is_in_range(dt.datetime.now().isocalendar()[1]):
                 return False
-        elif months := self.conditions.get("months"):       # from january=1 to december=12
+        elif months := self.conditions.get("months") is not None:       # from january=1 to december=12
             if not RangeFilter(months).is_in_range(dt.datetime.now().month):
                 return False
-        elif years := self.conditions.get("years"):         # from year 1 AD up to year 9999 AD 
+        elif years := self.conditions.get("years") is not None:         # from year 1 AD up to year 9999 AD 
             if not RangeFilter(years).is_in_range(dt.datetime.now().year):
                 return False
         
