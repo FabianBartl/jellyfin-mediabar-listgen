@@ -11,7 +11,7 @@ selection:
 
 playlists:
   - name: Featured
-    sort_by: Title                            # default: order; possible values: random, order, ProductionYear, Name
+    sort_by: Name                            # default: order; possible values: random, order, ProductionYear, Name
     sort_ascending: true                      # default: true; descending sorting order when false
     sort_strict: true                        # default: false, if false and sorting key does not exist, a suitable alternative sorting key is used 
     items:

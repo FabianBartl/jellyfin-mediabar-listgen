@@ -1,6 +1,6 @@
 # ignore requests cache
 http_cache.sqlite
-.cache
+*.cache
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
