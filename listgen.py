@@ -1,5 +1,6 @@
 
 import requests
+import requests_cache
 import yaml
 import re
 import datetime as dt
@@ -16,40 +17,125 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class Jellyfin:
-    def __init__(self, *, app_name: str, app_version: str, server_url: str, username: str, password: str):
-        self.logger = logging.getLogger(__class__.__name__)
+    def __init__(self, *, app_name: str, app_version: str, server_url: str, username: str, password: str, headers: dict = {}):
+        self.logger = logging.getLogger(f"{Path(__file__).stem}.{__class__.__name__}")
 
         self.app_name = app_name
         self.app_version = app_version
         self.server_url = server_url
+        self.device_id = str(uuid4()).split("-")[0]
         
-        self.device_id = str(uuid4())
-        self.headers = {"Authorization": f'MediaBrowser Client="other", Device="{self.app_name}", DeviceId="{self.device_id}", Version="{self.app_version}"'}
-        self.authenticate_as_user(username, password)
+        self.session = requests_cache.CachedSession()
+        self.session.headers.update(headers)
+        self.session.headers.update({
+            "Authorization": f'MediaBrowser Client="other", Device="{self.app_name}", DeviceId="{self.device_id}", Version="{self.app_version}"',
+        })
+        self.__authenticate_as_user(username, password)
+        
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(app_name='{self.app_name}', app_version='{self.app_version}', server_url='{self.server_url}', username='***', password='***', headers={self.headers})\nuserid='{self.user_id}', token='{self.auth_token}'"
 
-    def authenticate_as_user(self, username: str, password: str) -> None:
-        response = requests.post(
+    def __authenticate_as_user(self, username: str, password: str) -> None:
+        response = self.session.post(
             self.join_url(self.server_url, "Users", "AuthenticateByName"),
-            headers=self.headers,
             json={"username": username, "Pw": password}
         )
         response.raise_for_status()
         
         self.auth_token = response.json()["AccessToken"]
         self.user_id = response.json()["User"]["Id"]
-        self.headers["Authorization"] += f', Token="{self.auth_token}"'
-        self.logger.info(f"Authenticated token={self.auth_token} userid={self.user_id}")
+        self.session.headers["Authorization"] += f', Token="{self.auth_token}"'
+        self.logger.info(f"Authenticated as userid={self.user_id} with token={self.auth_token}")
 
     @staticmethod
     def join_url(*urls: str) -> str:
-        urls_cleaned = [ re.sub(r"[^\:][\/]\/+", "/", str(url).strip("/")) for url in urls ]
-        return "/".join(urls_cleaned)
+        return re.sub(r"[^\:][\/]\/+", "/", "/".join(urls))
         
     def get_item_metadata(self, item_id: str) -> dict:
         url = self.join_url(self.server_url, "Users", self.user_id, "Items", item_id)
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url)
         response.raise_for_status()
         return response.json()
+        
+
+
+class RangeFilter:
+    def __init__(self, _range: str):
+        self.range = _range
+        self.parse_range()
+    
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(_range='{self.range}')"
+
+    def parse_range(self) -> None:
+        numeric_pattern = r"[0-9]+(\.[0-9]+)?"
+        alphabetic_pattern = r"[a-z]+"
+        any_pattern = r"[^-]+"
+        separator_pattern = r" *- *"
+        
+        # match interval type: closed, left-open, right-open
+        if re.match(any_pattern + separator_pattern + any_pattern, self.range):
+            self.interval_type = "closed"
+        elif re.match(separator_pattern + any_pattern, self.range):
+            self.interval_type = "left-open"
+        elif re.match(any_pattern + separator_pattern, self.range):
+            self.interval_type = "right-open"
+        else:
+            raise SyntaxError("Expected format: 'any-any' or 'any-' or '-any'")
+
+        # match data type: numeric, alphabetic
+        # extract lower and/or upper bound value
+        lower_bound, upper_bound = self.range.split("-")
+        if self.interval_type == "closed":
+            if re.match(numeric_pattern, lower_bound) and re.match(numeric_pattern, upper_bound):
+                self.data_type = "numeric"
+                self.lower_bound = float(lower_bound)
+                self.upper_bound = float(upper_bound)
+            elif re.match(alphabetic_pattern, lower_bound) and re.match(alphabetic_pattern, upper_bound):
+                self.data_type = "alphabetic"
+                self.lower_bound = str(lower_bound)
+                self.upper_bound = str(upper_bound)
+            else:
+                raise SyntaxError("Expected same data type numeric or alphabetic for lower bound and upper bound.")
+            # lower bound higher than upper bound is allowed and inverts the condition
+            self.is_inverted = self.lower_bound > self.upper_bound
+        elif self.interval_type == "left-open":
+            if re.match(numeric_pattern, upper_bound):
+                self.data_type = "numeric"
+                self.upper_bound = float(upper_bound)
+            elif re.match(alphabetic_pattern, upper_bound):
+                self.data_type = "alphabetic"
+                self.upper_bound = str(upper_bound)
+            else:
+                raise SyntaxError("Expected data type numeric or alphabetic for upper bound.")
+        elif self.interval_type == "right-open":
+            if re.match(numeric_pattern, lower_bound):
+                self.data_type = "numeric"
+                self.lower_bound = float(lower_bound)
+            elif re.match(alphabetic_pattern, lower_bound):
+                self.data_type = "alphabetic"
+                self.lower_bound = str(lower_bound)
+            else:
+                raise SyntaxError("Expected data type numeric or alphabetic for lower bound.")
+
+    def is_in_range(self, value: Union[int, float, str]) -> bool:
+        if self.data_type == "numeric":
+            value = float(value)
+        elif self.data_type == "alphabetic":
+            value = str(value)
+        else:
+            raise ValueError(f"Unknown data type '{self.data_type}'")
+        
+        if self.interval_type == "closed":
+            if not self.is_inverted:
+                return self.lower_bound <= value <= self.upper_bound
+            else:
+                return self.lower_bound <= value >= self.upper_bound
+        elif self.interval_type == "left-open":
+            return value <= self.upper_bound
+        elif self.interval_type == "right-open":
+            return self.lower_bound <= value
+        raise ValueError(f"Unknown interval type '{self.interval_type}'")
         
 
 
@@ -59,7 +145,10 @@ class StaticPlaylist:
         self.item_ids = item_ids
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
-    
+        
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(name='{self.name}', item_ids={self.item_ids}, sort_by='{self.sort_by}', sort_ascending={self.sort_ascending})"
+
     def sort(self, jellyfin: Jellyfin) -> list[str]:
         item_ids = []
         ... #TODO
@@ -72,6 +161,9 @@ class DynamicPlaylist:
         self.filters = filters
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
+    
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(name='{self.name}', filters={self.filters}, sort_by='{self.sort_by}', sort_ascending={self.sort_ascending})"
 
     def bake(self, jellyfin: Jellyfin) -> StaticPlaylist:
         item_ids = []
@@ -85,6 +177,9 @@ class Conditional:
     def __init__(self, name: str, conditions: dict[str, Any] = {}):
         self.name = name
         self.conditions = conditions
+    
+    def __repr__(self) -> str:
+        return f"{__class__.__name__}(name='{self.name}', conditions={self.conditions})"
     
     def is_true(self) -> bool:
         any_condition_failed = False
@@ -109,7 +204,7 @@ class MediaBar:
         unique_names = set()
         conditionals = []
         for entry in data:
-            name = entry.pop("name")
+            name = entry.pop("name").lower()
 
             if name in unique_names:
                 raise ValueError(f"Conditions for playlist '{name}' are already defined.")
@@ -123,7 +218,7 @@ class MediaBar:
         unique_names = set()
         playlists = []
         for entry in data:
-            name = entry["name"]
+            name = entry["name"].lower()
             items = entry["items"]
             _type = items.pop("type")       # only conditions or item ids are left after popping the type
             
@@ -163,7 +258,7 @@ class MediaBar:
     
     def get_playlist(self, name: str) -> Union[StaticPlaylist, DynamicPlaylist]:
         for playlist in self.playlists:
-            if playlist.name.lower() == name.lower():
+            if playlist.name == name:
                 return playlist
         raise KeyError(f"Selected playlist '{name}' not defined.")
     
@@ -182,13 +277,51 @@ class MediaBar:
 
 
 
+def test() -> None:
+    print(True == RangeFilter("22-3").is_in_range("23"))  
+    print(False == RangeFilter("22-3").is_in_range("4"))
+    
+    print(True == RangeFilter("10-14").is_in_range("11"))
+    print(False == RangeFilter("10-14").is_in_range("9"))
+    
+    print(True == RangeFilter("a-d").is_in_range("b"))
+    print(False == RangeFilter("a-f").is_in_range("q"))
+
+    print(True == RangeFilter("a-").is_in_range("z"))
+    print(False == RangeFilter("-d").is_in_range("q"))
+
+    print(True == RangeFilter("22-").is_in_range("23"))
+    print(False == RangeFilter("22-").is_in_range("1"))
+    return
+    
+    mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
+    pprint(mediabar.conditionals)
+    pprint(mediabar.playlists)
+    
+    playlist: StaticPlaylist = mediabar.get_playlist("featured")
+    print(playlist.name, playlist.sort_by, playlist.sort_ascending)
+    pprint(playlist.item_ids)
+    return
+    
+    jellyfin = Jellyfin(
+        app_name="Media-Bar listgen.py",
+        app_version="0.0.1",
+        server_url="http://192.168.0.10:8096",
+        username="api-user",        # this user needs access to all libraries that should be included in the list
+        password=r"C5n0RS^8*Uv0D$I0ZEEr2D3Dn&QO&%b2",
+    )
+    item_ids = playlist.sort(jellyfin)
+    pprint(item_ids)
+    
+    
+
 def main() -> None:
     jellyfin = Jellyfin(
         app_name="Media-Bar listgen.py",
         app_version="0.0.1",
         server_url="http://192.168.0.10:8096",
         username="api-user",        # this user needs access to all libraries that should be included in the list
-        password=r"super-secret-password",
+        password=r"C5n0RS^8*Uv0D$I0ZEEr2D3Dn&QO&%b2",
     )
     
     mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
@@ -197,4 +330,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test()
