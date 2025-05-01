@@ -223,14 +223,15 @@ class StaticPlaylist:
 
     
 class DynamicPlaylist:
-    def __init__(self, name: str, filters: dict[str, Any] = {}, sort_by: str = "order", sort_ascending: bool = True):
+    def __init__(self, name: str, filters: dict[str, Any] = {}, sort_by: str = "order", sort_ascending: bool = True, sort_strict: bool = False):
         self.name = name
         self.filters = filters
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
+        self.sort_strict = sort_strict
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name={self.name.__repr__()}, filters={self.filters.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, filters={self.filters.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
 
     def bake(self, jellyfin: Jellyfin) -> StaticPlaylist:
         item_ids = []
@@ -302,7 +303,8 @@ class MediaBar:
                     name,
                     items["ids"],
                     entry.get("sort_by", "order"),
-                    entry.get("sort_ascending", True)
+                    entry.get("sort_ascending", True),
+                    entry.get("sort_strict", False),
                 )
             
             elif _type == "dynamic":
@@ -311,6 +313,7 @@ class MediaBar:
                     items,
                     entry.get("sort_by", "order"),
                     entry.get("sort_ascending", True)
+                    entry.get("sort_strict", False),
                 )
             
             else:
