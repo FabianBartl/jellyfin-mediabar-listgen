@@ -1,12 +1,13 @@
 
-import requests
+import dateutil.parser
 import requests_cache
 import yaml
+import json
+import random
 import re
+import dateutil.parser
 import datetime as dt
-import subprocess as sp
 import logging
-import os
 from pathlib import Path
 from uuid import uuid4
 from pprint import pprint
@@ -14,6 +15,7 @@ from tqdm import tqdm
 from typing import Any, Optional, Union, Callable
 
 logging.basicConfig(level=logging.DEBUG)
+
 
 
 class Jellyfin:
@@ -25,7 +27,10 @@ class Jellyfin:
         self.server_url = server_url
         self.device_id = str(uuid4()).split("-")[0]
         
-        self.session = requests_cache.CachedSession()
+        self.session = requests_cache.CachedSession(
+            f"{self.logger.name}.cache",
+            expire_after=dt.timedelta(hours=1),
+        )
         self.session.headers.update(headers)
         self.session.headers.update({
             "Authorization": f'MediaBrowser Client="other", Device="{self.app_name}", DeviceId="{self.device_id}", Version="{self.app_version}"',
@@ -140,19 +145,81 @@ class RangeFilter:
 
 
 class StaticPlaylist:
-    def __init__(self, name: str, item_ids: list[str], sort_by: str = "order", sort_ascending: bool = True):
+    def __init__(self, name: str, item_ids: list[str], sort_by: str = "order", sort_ascending: bool = True, sort_strict: bool = False):
         self.name = name
-        self.item_ids = item_ids
+        self.item_ids = sorted(set(item_ids), key=item_ids.index)
         self.sort_by = sort_by
+        self.raise_for_unsupported_sort_by()
         self.sort_ascending = sort_ascending
+        self.sort_strict = sort_strict
         
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name={self.name.__repr__()}, item_ids={self.item_ids.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, item_ids={self.item_ids.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
 
+    def raise_for_unsupported_sort_by(self) -> None:
+        self.__supported_sort_by = {                                                # data types:
+            "order", "random",                                                      #   Any
+            "Name", "OriginalTitle", "SortName",                                    #   str
+            "DateCreated", "PremiereDate",                                          #   datetime
+            "CriticRating", "CommunityRating", "RunTimeTicks", "ProductionYear",    #   int|float
+        }
+        if self.sort_by not in self.__supported_sort_by:
+            raise ValueError(f"Can't sort by '{self.sort_by}'")
+
+    @staticmethod
+    def dict_priority_get(data: dict[str, Any], default_value: Any, primary_key: str, *secondary_keys: str) -> Any:
+        for key in [primary_key, *secondary_keys]:
+            value = data.get(key, ...)
+            if value is not ...:
+                return value
+        return default_value
+    
     def sort(self, jellyfin: Jellyfin) -> list[str]:
-        item_ids = []
-        ... #TODO
+        self.raise_for_unsupported_sort_by()
+        match self.sort_by:
+            case "order":
+                return self.item_ids[:] if self.sort_ascending else self.item_ids[::-1]
+            case "random":
+                item_ids = self.item_ids[:]
+                random.shuffle(item_ids)
+                return item_ids
+            
+        items_metadata = [ jellyfin.get_item_metadata(item_id) for item_id in self.item_ids ]
+        match self.sort_by:
+            case "Name" | "OriginalTitle" | "SortName":
+                sort_func = lambda metadata: str(metadata.get(self.sort_by, ""))
+            case "DateCreated" | "PremiereDate":
+                sort_func = lambda metadata: dateutil.parser.isoparse(str(metadata.get(self.sort_by, "0001-01-01")))                    
+            case "CriticRating" | "CommunityRating" | "RunTimeTicks" | "ProductionYear":
+                sort_func = lambda metadata: float(metadata.get(self.sort_by, 0))
+
+        if not self.sort_strict:
+            match self.sort_by:
+                case "Name" | "OriginalTitle" | "SortName":
+                    sort_func = lambda metadata: str(self.dict_priority_get(metadata, "", self.sort_by, "SortName", "Name"))
+                
+                case "CriticRating" | "CommunityRating":
+                    def sort_func(metadata):
+                        if rating := metadata.get(self.sort_by, ...) is not ...:
+                            return float(rating)
+                        if self.sort_by == "CriticRating":
+                            return float(metadata.get("CommunityRating", 0)) * 10
+                        elif self.sort_by == "CommunityRating":
+                            return float(metadata.get("CriticRating", 0)) / 10
+
+                case "PremiereDate" | "ProductionYear":
+                    def sort_func(metadata):
+                        if dateyear := metadata.get(self.sort_by, ...) is not ...:
+                            return dateutil.parser.isoparse(dateyear if self.sort_by == "PremiereDate" else f"{dateyear}-01-01")
+                        if self.sort_by == "PremiereDate":
+                            return dateutil.parser.isoparse(f"{metadata.get('ProductionYear', '0001')}-01-01")
+                        elif self.sort_by == "ProductionYear":
+                            return dateutil.parser.isoparse(str(metadata.get("PremiereDate", "0001-01-01")))
+        
+        items_metadata.sort(key=sort_func, reverse=not self.sort_ascending)
+        item_ids = [ item["Id"] for item in items_metadata ]
         return item_ids
+
 
     
 class DynamicPlaylist:
@@ -247,7 +314,7 @@ class MediaBar:
                 )
             
             else:
-                raise ValueError(f"Unknown playlist type: {_type}")
+                raise ValueError(f"Unknown playlist type '{_type}'")
             
             playlists.append(new_playlist)
         return playlists
@@ -289,7 +356,6 @@ def test() -> None:
     playlist: StaticPlaylist = mediabar.get_playlist("featured")
     print(playlist.name, playlist.sort_by, playlist.sort_ascending)
     pprint(playlist.item_ids)
-    return
     
     jellyfin = Jellyfin(
         app_name="Media-Bar listgen.py",
