@@ -12,11 +12,50 @@ from pathlib import Path
 from uuid import uuid4
 from pprint import pprint
 from tqdm import tqdm
-from typing import Any, Optional, Union, Callable
+from typing import Any, Optional, Union, Callable, Iterable
 
 logging.basicConfig(level=logging.DEBUG)
 
 
+
+class Toolkit:
+    @staticmethod
+    def join_url(*urls: str) -> str:
+        return re.sub(r"[^\:][\/]\/+", "/", "/".join(urls))
+
+    @staticmethod
+    def dict_priority_get(data: dict[str, Any], default_value: Any, primary_key: str, *secondary_keys: str) -> Any:
+        # returns value of the first valid dictionary key, else the set default value
+        for key in [primary_key, *secondary_keys]:
+            value = data.get(key, ...)
+            if value is not ...:
+                return value
+        return default_value
+
+    @staticmethod
+    def dict_get_all(data: Iterable[dict], key: Any, default: Optional[Any] = None, discard: bool = False) -> list[Any]:
+        values = []
+        for entry in data:
+            if key not in entry and not discard:
+                values.append(default)
+            else:
+                values.append(entry.get(key, default))
+        return values
+
+    @staticmethod
+    def parse_list(value: Union[str, list[str]]) -> list[str]:
+        if isinstance(value, str):
+            return re.split(r" *, *", value)
+        elif isinstance(value, list):
+            return [ str(el) for el in value ]
+        raise TypeError(f"Expected comma separated strings or list: {value}")
+    
+    @staticmethod
+    def match_fuzzy(fuzzy: str, available: Iterable, get_func: Callable, default: Any = None, pattern: re.Pattern = r"[a-z0-9]+") -> Any:
+        mapping = { re.search(pattern, get_func(entry).lower()): entry for entry in available }
+        return mapping.get(re.search(pattern, fuzzy.lower()), default)
+
+    
 
 class Jellyfin:
     def __init__(self, *, app_name: str, app_version: str, server_url: str, username: str, password: str, headers: dict = {}):
@@ -29,7 +68,7 @@ class Jellyfin:
         
         # create cached session with 1 hour lifespan and authorize as user to get a token
         self.session = requests_cache.CachedSession(
-            f"{self.logger.name}.cache",
+            cache_name=f"{self.logger.name}.cache",
             expire_after=dt.timedelta(hours=1),
         )
         self.session.headers.update(headers)
@@ -43,7 +82,7 @@ class Jellyfin:
 
     def __authenticate_as_user(self, username: str, password: str) -> None:
         response = self.session.post(
-            self.join_url(self.server_url, "Users", "AuthenticateByName"),
+            Toolkit.join_url(self.server_url, "Users", "AuthenticateByName"),
             json={"username": username, "Pw": password}
         )
         response.raise_for_status()
@@ -53,51 +92,42 @@ class Jellyfin:
         self.session.headers["Authorization"] += f', Token="{self.auth_token}"'
         self.logger.info(f"Authenticated as userid={self.user_id} with token={self.auth_token}")
 
-    @staticmethod
-    def join_url(*urls: str) -> str:
-        return re.sub(r"[^\:][\/]\/+", "/", "/".join(urls))
-        
-    def get_user(self, user_id: str) -> dict:
-        # request a user
-        url = self.join_url(self.server_url, "Users", user_id)
-        response = self.session.get(url)
-        response.raise_for_status()
-        return response.json()
-        
-    def get_item(self, item_id: str) -> dict:
-        # request a single item
-        url = self.join_url(self.server_url, "Users", self.user_id, "Items", item_id)
-        response = self.session.get(url)
-        response.raise_for_status()
-        return response.json()
-
-    def get_items(self, item_ids: list[str]) -> dict:
-        # request given items
-        url = self.join_url(self.server_url, "Users", self.user_id, "Items")
-        response = self.session.get(url, params={"ids": item_ids})
-        response.raise_for_status()
-        return response.json()
-
-    def get_all_items(self, *, sort_by: str = "SortName", sort_ascending: bool = True, item_types: list[str] = ["Series", "Movies"], recursive: bool = True, parent_ids: list[str] = []) -> list[dict]:
-        # request all items from all or given libraries (parent_ids)
-        url = self.join_url(self.server_url, "Users", self.user_id, "Items")
-        params = {
-            "SortBy": sort_by,
-            "SortOrder": "Ascending" if sort_ascending else "Descending",
-            "IncludeItemTypes": ",".join(item_types),
-            "Recursive": recursive,
-            "ParentId": ",".join(parent_ids),
-        }
-        response = self.session.get(url, params=params)
+    def get(self, url: str, url_params: dict[str, Any] = {}, *, include_userid: bool = False, include_sort: bool = False) -> Any:
+        if "://" not in url and not url.startswith(self.server_url):
+            url = Toolkit.join_url(self.server_url, url)
+        params = {}
+        if include_userid:
+            params["userId"] = self.user_id
+        if include_sort:
+            params["SortBy"] = "SortName,ProductionYear"
+            params["SortOrder"] = "Ascending"
+            params["Recursive"] = "true"
+        params.update(url_params)
+        response = self.session.get(url, params)
         response.raise_for_status()
         return response.json()
     
+    def get_user(self, user_id: str) -> dict:
+        return self.get(Toolkit.join_url("Users", user_id))
+        
+    def get_item(self, item_id: str) -> dict:
+        return self.get(Toolkit.join_url("Users", self.user_id, "Items", item_id))
+
+    def get_items(self, item_ids: list[str], batch_size: int = 40) -> list[dict]:
+        items = []
+        item_ids_chunks = [ item_ids[ind:ind+batch_size] for ind in range(0, len(item_ids), batch_size) ]
+        for chunk in item_ids_chunks:
+            items.extend(self.get(Toolkit.join_url("Users", self.user_id, "Items"), {"ids": ",".join(chunk)}).get("Items", []))
+        return items
+
+    def get_all_items(self, **url_params: Any) -> list[dict]:
+        return self.get(Toolkit.join_url("Users", self.user_id, "Items"), url_params, include_sort=True).get("Items", [])
+    
     def get_all_libraries(self) -> list[dict]:
-        # request all libraries
-        url = self.join_url(self.server_url, "Library", "VirtualFolders")
-        response = self.session.get(url)
-        response.raise_for_status()
-        return response.json()
+        return self.get("UserViews", include_userid=True).get("Items", [])
+    
+    def get_all_genres(self, **url_params: Any) -> list[dict]:
+        return self.get("Genres", url_params, include_userid=True, include_sort=True).get("Items", [])
         
 
 
@@ -249,15 +279,6 @@ class StaticPlaylist:
         if self.sort_by not in self.__supported_sort_by:
             raise ValueError(f"Can't sort by '{self.sort_by}'")
 
-    @staticmethod
-    def dict_priority_get(data: dict[str, Any], default_value: Any, primary_key: str, *secondary_keys: str) -> Any:
-        # returns value of the first valid dictionary key, else the set default value
-        for key in [primary_key, *secondary_keys]:
-            value = data.get(key, ...)
-            if value is not ...:
-                return value
-        return default_value
-    
     def sort(self, jellyfin: Jellyfin) -> list[str]:
         self.raise_for_unsupported_sort_by()
         match self.sort_by:
@@ -268,9 +289,8 @@ class StaticPlaylist:
                 random.shuffle(item_ids)
                 return item_ids
         
-        # request item metadata from jellyfin one by one
-        # not in a single bulk request, otherwise the cache functionality won't work as good
-        items_metadata = [ jellyfin.get_item(item_id) for item_id in self.item_ids ]
+        # request item metadata from jellyfin
+        items_metadata = jellyfin.get_items(self.item_ids)
 
         # define strict sorting function
         match self.sort_by:
@@ -285,7 +305,7 @@ class StaticPlaylist:
             # overwrite strict sorting function if there is one
             match self.sort_by:
                 case "Name" | "OriginalTitle" | "SortName":
-                    sort_func = lambda metadata: str(self.dict_priority_get(metadata, "", self.sort_by, "SortName", "Name"))
+                    sort_func = lambda metadata: str(Toolkit.dict_priority_get(metadata, "", self.sort_by, "SortName", "Name"))
                 
                 case "CriticRating" | "CommunityRating":
                     def sort_func(metadata):
@@ -307,7 +327,7 @@ class StaticPlaylist:
         
         # apply the defined sort function
         items_metadata.sort(key=sort_func, reverse=not self.sort_ascending)
-        item_ids = [ item["Id"] for item in items_metadata ]
+        item_ids = Toolkit.dict_get_all(items_metadata, "Id")
         return item_ids
 
 
@@ -323,25 +343,97 @@ class DynamicPlaylist:
         self.sort_strict = sort_strict
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name={self.name.__repr__()}, filters={self.filters.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
-
-    @staticmethod
-    def parse_list(value: Union[str, list[str]]) -> list[str]:
-        if isinstance(value, str):
-            return re.split(r" *, *", value)
-        elif isinstance(value, list):
-            return [ str(el) for el in value ]
-        raise TypeError(f"Expected comma separated strings or list: {value}")
+        return f"{__class__.__name__}(name={self.name.__repr__()}, limit={self.limit.__repr__()}, include={self.include.__repr__()}, exclude={self.exclude.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
 
     def compile(self, jellyfin: Jellyfin) -> StaticPlaylist:
+        print(self.name)
         # create a static playlist based on a variety of filters
+        get_all_items__url_params = {}
 
-        # get all items
-        if self.filters.get(""):
-            pass
+        # get allowed item types
+        item_types = set(["BoxSet", "CollectionFolder", "Episode", "Movie", "Season", "Series", "Video"])
+        if (include_item_types := self.include.get("item_types")) is not None:
+            item_types &= set(Toolkit.parse_list(include_item_types))
+        elif (exclude_item_types := self.exclude.get("item_types")) is not None:
+            item_types -= set(Toolkit.parse_list(exclude_item_types))
+        get_all_items__url_params["includeItemTypes"] = ",".join(item_types)
 
+        print("item_types", item_types)
+
+        # get genres
+        genres = None
+        jellyfin_genres = jellyfin.get_all_genres()
+        match_genre_name = lambda genre: Toolkit.match_fuzzy(genre, jellyfin_genres, lambda genre: genre["Name"], "")
+        
+        if (include_genres := self.include.get("genres")) is not None:
+            genres = filter(len, map(match_genre_name, Toolkit.parse_list(include_genres)))
+        elif (exclude_genres := self.exclude.get("genres")) is not None:
+            genres = filter(len, map(match_genre_name, Toolkit.parse_list(exclude_genres)))
+            genres = set(jellyfin_genres) - set(genres)
+
+        if genres is not None and genres is not []:
+            genres = list(genres)
+            genre_ids = Toolkit.dict_get_all(genres, "Id")
+            get_all_items__url_params["genreIds"] = "|".join(genre_ids)
+
+        print("jellyfin_genres", Toolkit.dict_get_all(jellyfin_genres, "Name"))
+        print("genres", genres)
+
+        # get allowed library types
+        library_types = set(["unknown", "movies", "tvshows", "homevideos", "boxsets", "playlists", "folders"])
+        if (include_library_types := self.include.get("library_types")) is not None:
+            library_types &= set(Toolkit.parse_list(include_library_types))
+        elif (exclude_library_types := self.exclude.get("library_types")) is not None:
+            library_types -= set(Toolkit.parse_list(exclude_library_types))
+
+        print("library_types", library_types)
+
+        # get libraries
+        libraries = list(filter(lambda library: library["CollectionType"] in library_types, jellyfin.get_all_libraries()))
+        library_ids = set(Toolkit.dict_get_all(libraries, "Id"))
+        if (include_library_ids := self.include.get("library_ids")) is not None:
+            library_ids &= set(Toolkit.parse_list(include_library_ids))
+        elif (exclude_library_ids := self.exclude.get("library_ids")) is not None:
+            library_ids -= set(Toolkit.parse_list(exclude_library_ids))
+
+        print("before filtering libraries Name", Toolkit.dict_get_all(libraries, "Name"))
+        print("library_ids", library_ids)
+
+        # get all items from all filtered libraries
+        all_items = []
+        for library_id in library_ids:
+            new_items = jellyfin.get_all_items(parentId=library_id, **get_all_items__url_params)
+            all_items.extend(new_items)
+
+        # remove items, to exclude always
+        if (exclude_item_ids := self.exclude.get("item_ids")) is not None:
+            exclude_item_ids = set(Toolkit.parse_list(exclude_item_ids))
+            all_items = list(filter(lambda item: item["Id"] not in exclude_item_ids, all_items))
+
+        # remove items of excluded item type
+        all_items = list(filter(lambda item: item["MediaType"] not in item_types, all_items))
+
+        print("len all_items", len(all_items))
+        print("all_items[:5]")
+        pprint(all_items[:5])
+        pprint(Toolkit.dict_get_all(list(all_items), "Name"))
+
+        # add item ids, to include always
         item_ids = []
-        new_playlist = StaticPlaylist(self.name, item_ids, self.sort_by, self.sort_ascending)
+        if (include_item_ids := self.include.get("item_ids")) is not None:
+            item_ids = Toolkit.parse_list(include_item_ids)
+        
+        # TEMP
+        item_ids.extend(Toolkit.dict_get_all(all_items, "Id"))
+
+        # create static playlist of item ids
+        new_playlist = StaticPlaylist(
+            name = self.name,
+            item_ids = item_ids,
+            sort_by = self.sort_by,
+            sort_ascending = self.sort_ascending,
+            sort_strict = self.sort_strict,
+        )
         return new_playlist
 
 
@@ -469,11 +561,11 @@ class MediaBar:
             playlists.append(new_playlist)
         return playlists
     
-    def get_selected(self, **conditonal_kwargs) -> Conditional:
+    def get_selected(self, **conditional_kwargs) -> Conditional:
         # returns first Conditional where all conditions are met, otherwise the last one
         selected = self.conditionals[-1]
         for conditional in self.conditionals:
-            if conditional.is_true(**conditonal_kwargs):
+            if conditional.is_true(**conditional_kwargs):
                 selected = conditional
                 break
         return selected
@@ -498,8 +590,8 @@ class MediaBar:
     def export_legacy_format(playlist_name: str, item_ids: list[str], filename: Path = Path("list.txt")) -> None:
         # the name of the playlist, followed by a list of item ids, one per line
         with open(filename, "w", encoding="utf-8") as file:
-            file.writelines([playlist_name])
-            file.writelines(item_ids)
+            file.write(f"{playlist_name}\n")
+            file.write("\n".join(item_ids))
 
 
 
