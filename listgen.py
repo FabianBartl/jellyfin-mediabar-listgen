@@ -363,6 +363,7 @@ class DynamicPlaylist:
         # get genres
         genres = None
         jellyfin_genres = jellyfin.get_all_genres()
+        # TODO: make it work
         match_genre_name = lambda genre: Toolkit.match_fuzzy(genre, jellyfin_genres, lambda genre: genre["Name"], "")
         
         if (include_genres := self.include.get("genres")) is not None:
@@ -423,13 +424,15 @@ class DynamicPlaylist:
         if (include_item_ids := self.include.get("item_ids")) is not None:
             item_ids = Toolkit.parse_list(include_item_ids)
         
+        # TODO: filter by year, tags, name_startwith, community rating, critics rating, official rating, runtime
+
         # TEMP
         item_ids.extend(Toolkit.dict_get_all(all_items, "Id"))
-
+        
         # create static playlist of item ids
         new_playlist = StaticPlaylist(
             name = self.name,
-            item_ids = item_ids,
+            item_ids = item_ids[:self.limit],
             sort_by = self.sort_by,
             sort_ascending = self.sort_ascending,
             sort_strict = self.sort_strict,
