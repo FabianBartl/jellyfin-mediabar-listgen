@@ -64,15 +64,22 @@ class Jellyfin:
         response.raise_for_status()
         return response.json()
 
-    def get_all_items(self, *, parent_id: Optional[str] = None, sort_by: str = "SortName", sort_ascending: bool = True, item_types: str = "Series,Movies", recursive: bool = True) -> list[dict]:
-        # request all items
+    def get_items(self, item_ids: list[str]) -> dict:
+        # request given items
+        url = self.join_url(self.server_url, "Users", self.user_id, "Items")
+        response = self.session.get(url, params={"ids": item_ids})
+        response.raise_for_status()
+        return response.json()
+
+    def get_all_items(self, *, sort_by: str = "SortName", sort_ascending: bool = True, item_types: list[str] = ["Series", "Movies"], recursive: bool = True, parent_ids: list[str] = []) -> list[dict]:
+        # request all items from all or given libraries (parent_ids)
         url = self.join_url(self.server_url, "Users", self.user_id, "Items")
         params = {
             "SortBy": sort_by,
             "SortOrder": "Ascending" if sort_ascending else "Descending",
-            "IncludeItemTypes": item_types,
+            "IncludeItemTypes": ",".join(item_types),
             "Recursive": recursive,
-            "ParentId": parent_id,
+            "ParentId": ",".join(parent_ids),
         }
         response = self.session.get(url, params=params)
         response.raise_for_status()
@@ -87,35 +94,48 @@ class Jellyfin:
         
 
 
-class RangeFilter:
-    def __init__(self, _range: str):
-        self.range = _range
-        self.__parse_range()
+class Interval:
+    def __init__(self, interval: str):
+        self.__interval = interval
+        self.__parse_interval()
     
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(_range={self.range.__repr__()})"
+        return f"{__class__.__name__}(interval={self.__interval.__repr__()})"
 
-    def __parse_range(self) -> None:
+    def __parse_interval(self) -> None:
         numeric_pattern = r"[0-9]+(\.[0-9]+)?"
         alphabetic_pattern = r"[a-z]+"
+        date_pattern = r"[0-9]{4}_[0-9]{2}_[0-9]{2}"    # YYYY_MM_DD    (does not validate the date itself!)
         any_pattern = r"[^-]+"
         separator_pattern = r" *- *"
         
-        # match interval type: closed, left-open, right-open
-        if re.match(any_pattern + separator_pattern + any_pattern, self.range):
+        # match interval type: closed, left-open, right-open, open, exact
+        if re.fullmatch(any_pattern + separator_pattern + any_pattern, self.__interval):
             self.__interval_type = "closed"
-        elif re.match(separator_pattern + any_pattern, self.range):
+        elif re.fullmatch(separator_pattern + any_pattern, self.__interval):
             self.__interval_type = "left-open"
-        elif re.match(any_pattern + separator_pattern, self.range):
+        elif re.fullmatch(any_pattern + separator_pattern, self.__interval):
             self.__interval_type = "right-open"
+        elif re.fullmatch(separator_pattern, self.__interval):
+            self.__interval_type = "open"
+        elif re.fullmatch(any_pattern, self.__interval):
+            self.__interval_type = "exact"
         else:
-            raise SyntaxError("Expected format: 'any-any' or 'any-' or '-any'")
+            raise SyntaxError("Expected format: 'any-any' or 'any-' or '-any' or '-' or 'any'")
 
-        # match data type: numeric, alphabetic
-        # and extract lower and/or upper bound values
-        lower_bound, upper_bound = re.split(separator_pattern, self.range)
-        numeric_lower_bound, numeric_upper_bound = re.match(numeric_pattern, lower_bound), re.match(numeric_pattern, upper_bound)
-        alphabetic_lower_bound, alphabetic_upper_bound = re.match(alphabetic_pattern, lower_bound), re.match(alphabetic_pattern, upper_bound)
+        # TODO: re-work the following using match-case syntax
+        # https://stackoverflow.com/questions/74713626/how-to-use-structural-pattern-matching-match-case-with-regex
+
+        # extract lower and/or upper bound values
+        lower_bound, upper_bound, *_ = re.split(separator_pattern, self.__interval) + [None, None]
+
+        # match data type: numeric, alphabetic, date
+        numeric_lower_bound = re.fullmatch(numeric_pattern, lower_bound)
+        numeric_upper_bound = re.fullmatch(numeric_pattern, upper_bound)
+        alphabetic_lower_bound = re.fullmatch(alphabetic_pattern, lower_bound)
+        alphabetic_upper_bound = re.fullmatch(alphabetic_pattern, upper_bound)
+        date_lower_bound = re.fullmatch(date_pattern, lower_bound)
+        date_upper_bound = re.fullmatch(date_pattern, upper_bound)
         
         if self.__interval_type == "closed":
             if numeric_lower_bound:
@@ -132,8 +152,15 @@ class RangeFilter:
                     self.__upper_bound = str(upper_bound)
                 else:
                     raise TypeError(f"Expected alphabetic data type for upper bound: {upper_bound}")
+            elif date_lower_bound:
+                if date_upper_bound:
+                    self.__data_type = "date"
+                    self.__lower_bound = dt.datetime.strftime(lower_bound, r"%Y_%m_%d")
+                    self.__upper_bound = dt.datetime.strftime(upper_bound, r"%Y_%m_%d")
+                else:
+                    raise TypeError(f"Expected date data type for upper bound: {upper_bound}")
             else:
-                raise TypeError(f"Expected same data type numeric or alphabetic for lower bound ({lower_bound}) and upper bound ({upper_bound}).")
+                raise TypeError(f"Expected same data type numeric, alphabetic or date for lower bound ({lower_bound}) and upper bound ({upper_bound}).")
 
             # lower bound higher than upper bound is allowed and inverts the condition
             self.__is_inverted = self.__lower_bound > self.__upper_bound
@@ -145,29 +172,39 @@ class RangeFilter:
             elif alphabetic_upper_bound:
                 self.__data_type = "alphabetic"
                 self.__upper_bound = str(upper_bound)
+            elif date_upper_bound:
+                self.__data_type = "date"
+                self.__upper_bound = dt.datetime.strftime(upper_bound, r"%Y_%m_%d")
             else:
-                raise TypeError(f"Expected data type numeric or alphabetic for upper bound: {upper_bound}")
+                raise TypeError(f"Expected data type numeric, alphabetic or date for upper bound: {upper_bound}")
             
-        elif self.__interval_type == "right-open":
+        elif self.__interval_type == "right-open" or self.__interval_type == "exact":
             if numeric_lower_bound:
                 self.__data_type = "numeric"
                 self.__lower_bound = float(lower_bound)
             elif alphabetic_lower_bound:
                 self.__data_type = "alphabetic"
                 self.__lower_bound = str(lower_bound)
+            elif date_lower_bound:
+                self.__data_type = "date"
+                self.__lower_bound = dt.datetime.strftime(lower_bound, r"%Y_%m_%d")
             else:
-                raise TypeError(f"Expected data type numeric or alphabetic for lower bound: {lower_bound}")
-
-    def is_in_range(self, value: Union[int, float, str]) -> bool:
-        # ensure data type
-        if self.__data_type == "numeric":
-            value = float(value)
-        elif self.__data_type == "alphabetic":
-            value = str(value)
-        else:
-            raise ValueError(f"Unknown data type '{self.__data_type}'")
+                raise TypeError(f"Expected data type numeric, alphabetic or date for lower bound: {lower_bound}")
         
-        # check if value is in range, depending on the interval type and inversion
+        elif self.__interval_type == "open":
+            self.__data_type = None
+            self.__lower_bound = None
+            self.__upper_bound = None
+    
+    def __contains__(self, value: Any) -> bool:
+        return self.is_in_interval(value)
+    
+    def is_in_interval(self, value: Any) -> bool:
+        # always in range without bounding
+        if self.__interval_type == "open":
+            return True
+        
+        # check if value is in range, depending on the interval type
         if self.__interval_type == "closed":
             if not self.__is_inverted:
                 return self.__lower_bound <= value <= self.__upper_bound
@@ -177,8 +214,10 @@ class RangeFilter:
             return value <= self.__upper_bound
         elif self.__interval_type == "right-open":
             return self.__lower_bound <= value
+        elif self.__interval_type == "exact":
+            return self.__lower_bound == value
         raise ValueError(f"Unknown interval type '{self.__interval_type}'")
-        
+
 
 
 class StaticPlaylist:
@@ -277,9 +316,42 @@ class DynamicPlaylist:
     def __repr__(self) -> str:
         return f"{__class__.__name__}(name={self.name.__repr__()}, filters={self.filters.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
 
-    def compile(self, jellyfin: Jellyfin) -> StaticPlaylist:
-        # create a static playlist based on a variety of filters
+    @staticmethod
+    def parse_list(value: Union[str, list[str]]) -> list[str]:
+        if isinstance(value, str):
+            return re.split(r" *, *", value)
+        elif isinstance(value, list):
+            return [ str(el) for el in value ]
+        raise TypeError(f"Expected comma separated strings or list: {value}")
 
+    def compile(self, jellyfin: Jellyfin) -> StaticPlaylist:
+        # create a static playlist based on a variety of supported filters
+        self.__supported_filters = {
+            "limit":                    (int, 20),
+            "runtime":                  (Interval, "-"),
+            "CriticRating":             (Interval, "-"),
+            "CommunityRating":          (Interval, "-"),
+            "OfficialRating":           (Interval, "-"),
+            "Width":                    (Interval, "-"),
+            "Height":                   (Interval, "-"),
+            "ProductionYear":           (Interval, "-"),
+            "Tags":                     (self.parse_list, []),
+            "exclude_Tags":             (self.parse_list, []),
+            "Genres":                   (self.parse_list, []),
+            "exclude_Genres":           (self.parse_list, []),
+            "ParentIds":                (self.parse_list, []),
+            "exclude_ParentIds":        (self.parse_list, []),
+            "ItemTypes":                (self.parse_list, ["Movies", "Series"]),
+            "Is3d":                     (lambda val: None if val is None else bool(val), None),
+        }
+
+        parsed_filters = {}
+        for filter_name, (parser_func, default_value) in self.__supported_filters.items():
+            set_value = self.filters.get(filter_name, default_value)
+            parsed_value = parser_func(set_value)
+            parsed_filters[filter_name] = parsed_value
+
+        pprint(parsed_filters)
 
         item_ids = []
         new_playlist = StaticPlaylist(self.name, item_ids, self.sort_by, self.sort_ascending)
@@ -299,23 +371,26 @@ class Conditional:
         if self.conditions.get("disabled", False):
             return False
         
-        elif (hours := self.conditions.get("hours")) is not None:         # 24-hour format
-            if not RangeFilter(hours).is_in_range(dt.datetime.now().hour):
+        elif (hours := self.conditions.get("hours")) is not None:         # from hour 0 to 23
+            if not Interval(hours).is_in_interval(dt.datetime.now().hour):
                 return False
         elif (weekdays := self.conditions.get("weekdays")) is not None:   # from monday=1 to sunday=7
-            if not RangeFilter(weekdays).is_in_range(dt.datetime.now().isoweekday()):
+            if not Interval(weekdays).is_in_interval(dt.datetime.now().isoweekday()):
                 return False
         elif (days := self.conditions.get("days")) is not None:           # from 1st day of the month up to max 31st day
-            if not RangeFilter(days).is_in_range(dt.datetime.now().day):
+            if not Interval(days).is_in_interval(dt.datetime.now().day):
                 return False
         elif (weeks := self.conditions.get("weeks")) is not None:         # from 1st week of the year up to max 52nd week
-            if not RangeFilter(weeks).is_in_range(dt.datetime.now().isocalendar()[1]):
+            if not Interval(weeks).is_in_interval(dt.datetime.now().isocalendar()[1]):
                 return False
         elif (months := self.conditions.get("months")) is not None:       # from january=1 to december=12
-            if not RangeFilter(months).is_in_range(dt.datetime.now().month):
+            if not Interval(months).is_in_interval(dt.datetime.now().month):
                 return False
         elif (years := self.conditions.get("years")) is not None:         # from year 1 AD up to year 9999 AD 
-            if not RangeFilter(years).is_in_range(dt.datetime.now().year):
+            if not Interval(years).is_in_interval(dt.datetime.now().year):
+                return False
+        elif (dates := self.conditions.get("dates")) is not None:         # date format YYYY_MM_DD
+            if not Interval(dates).is_in_interval(dt.datetime.now()):
                 return False
         
         return True
@@ -422,27 +497,6 @@ class MediaBar:
             file.writelines(item_ids)
 
 
-
-def test() -> None:
-    mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
-    pprint(mediabar.conditionals)
-    pprint(mediabar.playlists)
-    
-    playlist: StaticPlaylist = mediabar.get_playlist("featured")
-    print(playlist.name, playlist.sort_by, playlist.sort_ascending)
-    pprint(playlist.item_ids)
-    
-    jellyfin = Jellyfin(
-        app_name="Media-Bar listgen.py",
-        app_version="0.0.1",
-        server_url="http://192.168.0.10:8096",
-        username="api-user",        # this user needs access to all libraries that should be included in the list
-        password=r"C5n0RS^8*Uv0D$I0ZEEr2D3Dn&QO&%b2",
-    )
-    item_ids = playlist.sort(jellyfin)
-    pprint(item_ids)
-    
-    
 
 def main() -> None:
     jellyfin = Jellyfin(
