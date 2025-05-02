@@ -1,5 +1,3 @@
-version: 0.1
-
 selection:
   - name: Thrillers of the 90s
     disabled: false              # entry can be easily disabled
@@ -28,30 +26,34 @@ playlists:
     items:
       type: dynamic
       limit: 15                               # default: 20
-      production_year: 1990 - 1999
-      genres: thriller, drama                 # condition is met, if any genre is matched
-      exclude_genres: mystery
+      include:
+        production_year: 1990 - 1999
+        genres: thriller, drama                 # condition is met, if any genre is matched
+      exclude:
+        genres: mystery
   
   - name: Mid rated DVDs
     sort_by: random
     items:
       type: dynamic
-      tags: dvd                      # i gave all DVDs this tag in my library
-      community_rating: 6 - 7        # i decided to use always this range syntax, to support very specific conditions
-      critics_rating: 60 - 70        # every condition must be met for any item to be selected, therefore both rating formats must be met
-      limit: 10                      # limit to 10 results
-      exclude_library_ids:
-        - 43cfe12fe7d9d8d21251e0964e0232e2    # exclude series library
-        - deaac6c2087e889a2748c15094342b7e    #         kids library
-      # OR: include (not combinable with exclude)
-      # include_library_ids:
-      #   - 7a2175bccb1f1a94152cbd2b2bae8f6d    # include movies library
+      include:
+        tags: dvd                      # i gave all DVDs this tag in my library
+        community_rating: 6 - 7        # i decided to use always this range syntax, to support very specific conditions
+        critics_rating: 60 - 70        # every condition must be met for any item to be selected, therefore both rating formats must be met
+        limit: 10                      # limit to 10 results
+        parent_ids:
+          - 7a2175bccb1f1a94152cbd2b2bae8f6d    # include movies library
+      exclude:
+        parent_ids:
+          - 43cfe12fe7d9d8d21251e0964e0232e2    # exclude series library
+          - deaac6c2087e889a2748c15094342b7e    #         kids library
 
   - name: Way to long movies
     sort_by: name
     items:
       type: dynamic
-      runtime: "3:00 -"       # format is HH:MM  (upper or lower range limit can be omitted for range syntax, but the separator must be present)
+      include:
+        runtime: "3:00 -"       # format is HH:MM  (upper or lower range limit can be omitted for range syntax, but the separator must be present)
   
   - name: Latest
     sort_by: creation_date

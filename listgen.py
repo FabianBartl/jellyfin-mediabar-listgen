@@ -221,7 +221,7 @@ class Interval:
 
 
 class StaticPlaylist:
-    def __init__(self, name: str, item_ids: list[str], sort_by: str = "order", sort_ascending: bool = True, sort_strict: bool = False):
+    def __init__(self, *, name: str, item_ids: list[str], sort_by: str, sort_ascending: bool, sort_strict: bool):
         self.name = name
         self.item_ids = sorted(set(item_ids), key=item_ids.index)       # remove duplicate item ids
         self.sort_by = sort_by
@@ -306,9 +306,11 @@ class StaticPlaylist:
 
     
 class DynamicPlaylist:
-    def __init__(self, name: str, filters: dict[str, Any] = {}, sort_by: str = "order", sort_ascending: bool = True, sort_strict: bool = False):
+    def __init__(self, *, name: str, limit: int, include: dict[str, Any], exclude: dict[str, Any], sort_by: str, sort_ascending: bool, sort_strict: bool):
         self.name = name
-        self.filters = filters
+        self.limit = limit
+        self.include = include
+        self.exclude = exclude
         self.sort_by = sort_by
         self.sort_ascending = sort_ascending
         self.sort_strict = sort_strict
@@ -325,33 +327,11 @@ class DynamicPlaylist:
         raise TypeError(f"Expected comma separated strings or list: {value}")
 
     def compile(self, jellyfin: Jellyfin) -> StaticPlaylist:
-        # create a static playlist based on a variety of supported filters
-        self.__supported_filters = {
-            "limit":                    (int, 20),
-            "runtime":                  (Interval, "-"),
-            "CriticRating":             (Interval, "-"),
-            "CommunityRating":          (Interval, "-"),
-            "OfficialRating":           (Interval, "-"),
-            "Width":                    (Interval, "-"),
-            "Height":                   (Interval, "-"),
-            "ProductionYear":           (Interval, "-"),
-            "Tags":                     (self.parse_list, []),
-            "exclude_Tags":             (self.parse_list, []),
-            "Genres":                   (self.parse_list, []),
-            "exclude_Genres":           (self.parse_list, []),
-            "ParentIds":                (self.parse_list, []),
-            "exclude_ParentIds":        (self.parse_list, []),
-            "ItemTypes":                (self.parse_list, ["Movies", "Series"]),
-            "Is3d":                     (lambda val: None if val is None else bool(val), None),
-        }
+        # create a static playlist based on a variety of filters
 
-        parsed_filters = {}
-        for filter_name, (parser_func, default_value) in self.__supported_filters.items():
-            set_value = self.filters.get(filter_name, default_value)
-            parsed_value = parser_func(set_value)
-            parsed_filters[filter_name] = parsed_value
-
-        pprint(parsed_filters)
+        # get all items
+        if self.filters.get(""):
+            pass
 
         item_ids = []
         new_playlist = StaticPlaylist(self.name, item_ids, self.sort_by, self.sort_ascending)
@@ -366,6 +346,9 @@ class Conditional:
     
     def __repr__(self) -> str:
         return f"{__class__.__name__}(name={self.name.__repr__()}, conditions={self.conditions.__repr__()})"
+    
+    def __bool__(self) -> bool:
+        return self.is_true()
     
     def is_true(self) -> bool:
         if self.conditions.get("disabled", False):
@@ -401,13 +384,13 @@ class MediaBar:
     def __init__(self, *, filename: Path):
         self.logger = logging.getLogger(__class__.__name__)
         self.__filename = filename
-        self.__parse_file(filename)
+        self.__parse_file()
     
     def __repr__(self) -> str:
         return f"{__class__.__name__}(filename={self.__filename.__repr__()}"
     
-    def __parse_file(self, filename: Path) -> None:
-        with open(filename, "r", encoding="utf-8", errors="replace") as file:
+    def __parse_file(self) -> None:
+        with open(self.__filename, "r", encoding="utf-8", errors="replace") as file:
             filedata = yaml.load(file.read(), yaml.Loader)
         
         # all playlist names are converted to lower case when imported
@@ -435,7 +418,7 @@ class MediaBar:
         for entry in data:
             name = entry["name"].lower()
             items = entry["items"]
-            _type = items.pop("type")       # only conditions or item ids are left after popping the type
+            _type = items.pop("type")       # only filters or item ids are left after popping the type
             
             if name in unique_names:
                 raise ValueError(f"Playlist '{name}' is already defined.")
@@ -443,20 +426,22 @@ class MediaBar:
             
             if _type == "static":
                 new_playlist = StaticPlaylist(
-                    name,
-                    items["ids"],
-                    entry.get("sort_by", "order"),
-                    entry.get("sort_ascending", True),
-                    entry.get("sort_strict", False),
+                    name = name,
+                    ids = items["ids"],
+                    sort_by = entry.get("sort_by", "order"),
+                    sort_ascending = entry.get("sort_ascending", True),
+                    sort_strict = entry.get("sort_strict", False),
                 )
             
             elif _type == "dynamic":
                 new_playlist = DynamicPlaylist(
-                    name,
-                    items,
-                    entry.get("sort_by", "order"),
-                    entry.get("sort_ascending", True),
-                    entry.get("sort_strict", False),
+                    name = name,
+                    limit = items.get("limit", 20),
+                    include = items.get("include", {}),
+                    exclude = items.get("exclude", {}),
+                    sort_by = entry.get("sort_by", "order"),
+                    sort_ascending = entry.get("sort_ascending", True),
+                    sort_strict = entry.get("sort_strict", False),
                 )
             
             else:
@@ -490,7 +475,7 @@ class MediaBar:
         return conditional.name, item_ids
     
     @staticmethod
-    def export_legacy_format(playlist_name: str, item_ids: list[str], filename: Path) -> None:
+    def export_legacy_format(playlist_name: str, item_ids: list[str], filename: Path = Path("list.txt")) -> None:
         # the name of the playlist, followed by a list of item ids, one per line
         with open(filename, "w", encoding="utf-8") as file:
             file.writelines([playlist_name])
@@ -509,7 +494,7 @@ def main() -> None:
     
     mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
     playlist_name, item_ids = mediabar.evaluate(jellyfin)
-    mediabar.export_legacy_format(playlist_name, item_ids, Path("list.txt"))
+    mediabar.export_legacy_format(playlist_name, item_ids)
 
 
 if __name__ == "__main__":
