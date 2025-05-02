@@ -57,6 +57,13 @@ class Jellyfin:
     def join_url(*urls: str) -> str:
         return re.sub(r"[^\:][\/]\/+", "/", "/".join(urls))
         
+    def get_user(self, user_id: str) -> dict:
+        # request a user
+        url = self.join_url(self.server_url, "Users", user_id)
+        response = self.session.get(url)
+        response.raise_for_status()
+        return response.json()
+        
     def get_item(self, item_id: str) -> dict:
         # request a single item
         url = self.join_url(self.server_url, "Users", self.user_id, "Items", item_id)
@@ -350,7 +357,7 @@ class Conditional:
     def __bool__(self) -> bool:
         return self.is_true()
     
-    def is_true(self) -> bool:
+    def is_true(self, *, jellyfin: Optional[Jellyfin] = None, user_id: Optional[str] = None) -> bool:
         if self.conditions.get("disabled", False):
             return False
         
@@ -375,6 +382,18 @@ class Conditional:
         elif (dates := self.conditions.get("dates")) is not None:         # date format YYYY_MM_DD
             if not Interval(dates).is_in_interval(dt.datetime.now()):
                 return False
+        
+        # check conditions that require communication with jellyfin to get user data
+        if isinstance(jellyfin, Jellyfin) and user_id is not None:
+            user = jellyfin.get_user()
+            
+            if (user_age := self.conditions.get("user_age")) is not None:
+                if (max_parental_rating := user.get("Policy", {}).get("MaxParentalRating")) is not None:
+                    # extract age from parental rating label
+                    # TODO: support all jellyfin ratings correctly
+                    parental_rating_num = int(re.search(r"[0-9]+", f"0{max_parental_rating}"))
+                    if not Interval(user_age).is_in_interval(parental_rating_num):
+                        return False
         
         return True
 
@@ -427,7 +446,7 @@ class MediaBar:
             if _type == "static":
                 new_playlist = StaticPlaylist(
                     name = name,
-                    ids = items["ids"],
+                    item_ids = items["ids"],
                     sort_by = entry.get("sort_by", "order"),
                     sort_ascending = entry.get("sort_ascending", True),
                     sort_strict = entry.get("sort_strict", False),
@@ -450,11 +469,11 @@ class MediaBar:
             playlists.append(new_playlist)
         return playlists
     
-    def get_selected(self) -> Conditional:
+    def get_selected(self, **conditonal_kwargs) -> Conditional:
         # returns first Conditional where all conditions are met, otherwise the last one
         selected = self.conditionals[-1]
         for conditional in self.conditionals:
-            if conditional.is_true():
+            if conditional.is_true(**conditonal_kwargs):
                 selected = conditional
                 break
         return selected
@@ -466,9 +485,10 @@ class MediaBar:
                 return playlist
         raise KeyError(f"Selected playlist '{name}' not defined.")
     
-    def evaluate(self, jellyfin: Jellyfin) -> tuple[str, list[str]]:
+    def evaluate(self, jellyfin: Jellyfin, *, user_id: Optional[str] = None) -> tuple[str, list[str]]:
         # evaluates the whole imported config and returns the selected playlist name and sorted playlist item ids
-        conditional = self.get_selected()
+        # TODO: if user_id is set, user-based Conditionals can be checked too
+        conditional = self.get_selected(jellyfin=jellyfin, user_id=user_id)
         playlist = self.get_playlist(conditional.name)
         static_playlist = playlist.compile(jellyfin) if isinstance(playlist, DynamicPlaylist) else playlist
         item_ids = static_playlist.sort(jellyfin)
@@ -488,8 +508,8 @@ def main() -> None:
         app_name="Media-Bar listgen.py",
         app_version="0.0.1",
         server_url="http://192.168.0.10:8096",
-        username="api-user",        # this user needs access to all libraries that should be included in the list
-        password=r"C5n0RS^8*Uv0D$I0ZEEr2D3Dn&QO&%b2",
+        username="api-user",                            # this user needs access to all libraries that should be included in the list
+        password=r"C5n0RS^8*Uv0D$I0ZEEr2D3Dn&QO&%b2",   # password leaked, but server url is local, so it doesn't matter
     )
     
     mediabar = MediaBar(filename=Path(r"mediabar.yaml"))
