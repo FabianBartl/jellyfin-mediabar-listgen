@@ -1,4 +1,12 @@
 
+"""
+License: MIT
+Author: Fabian Bartl
+Repository: https://github.com/FabianBartl/jellyfin-scripts
+Last update: 2025-05-03
+"""
+
+
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
