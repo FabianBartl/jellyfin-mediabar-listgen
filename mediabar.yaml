@@ -2,7 +2,7 @@ selection:
   - name: Thrillers of the 90s
     disabled: false              # entry can be easily disabled
     user_age: 16-
-    # hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
+    hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
   
   - name: Featured              # no condition, so it will be selected if none of the previous conditions are met
 
@@ -29,7 +29,7 @@ playlists:
       limit: 15                               # default: 20
       include:
         production_year: 1990 - 1999
-        genres: thriller, drama                 # condition is met, if any genre is matched
+        genres: thriller                 # condition is met, if any genre is matched
         item_ids: 3ce8a38751d766d2637b51349bff34d6
         item_types: Movie                  # default: Movie, Series
       exclude:
