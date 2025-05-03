@@ -4,13 +4,26 @@
 A collection of scripts that make my life easier when managing a considerably large Jellyfin library.
 
 
+
 ## Scripts
+
 
 **[merge-multi-versions.py](scripts/merge-multi-versions.py)**
 
 *Imagine you have many episoded of a tv show, but the subtitles are not embedded and instead of one video file with multiple audio tracks, there are multiple video files with one audio track each.*
 
 This script will combine the video with all audio and subtitle languages present into a single file.
+
+
+**[merge-videos.py](scripts/merge-videos.py)**
+
+Merges two videos into one and keeps the chapters with corrected timestamps. You can add chapters to any video with the [create-chapters.py](scripts/create-chapters.py) script.
+
+
+**[create-chapters.py](scripts/create-chapters.py)**
+
+Add named chapters to any video file. Can be used in combination with the [merge-videos.py](scripts/merge-videos.py) script.
+
 
 
 ## Tools

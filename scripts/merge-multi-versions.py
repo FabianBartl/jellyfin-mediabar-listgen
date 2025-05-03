@@ -367,7 +367,6 @@ for episode, languages in related_episodes.items():
 
     print(f"{episode}: output as", str(output_file))
 
-    
     # execute ffmpeg
     print(f"{episode}:\n", " ".join(ffmpeg.build()))
     if FFMPEG_EXECUTE:
