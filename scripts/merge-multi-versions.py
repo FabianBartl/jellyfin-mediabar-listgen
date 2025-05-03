@@ -48,6 +48,11 @@ FILE_RENAME_PATTERN = {
     "repl": r"\g<series> - \g<title> S\g<season>E\g<episode>" + " [ÖRR] [1080p]" + r" [LANG-\g<lang>]\g<ext>",
 }
 
+# all files from the input folder will be renamed by this, so if you mess up the regex, you will need to revert the renaming
+# (by loading the backup you made)
+# if the first step goes right, you can execute the script as many times as you want without breaking something, because the
+# following steps only modify the output, which can be re-generated
+
 # every file of the same episode is identified by this regex
 # in my case for example: S01E22 or S1E3, but not S1-E2 or SE4
 COMMON_EPISODE_PATTERN = r"S\d+E\d+"
@@ -85,7 +90,16 @@ FFMPEG_BIN = r"ffmpeg"
 # append the -y option to the ffmpeg command?
 FFMPEG_YES = True
 
+# set this to True, if you are happy with your config 
+START_THE_SCRIPT = False
+
 """################### END OF USER CONFIG ###################"""
+
+
+if not START_THE_SCRIPT:
+    print("you need to read the config before you can execute the script")
+    print("(you probably just forgot to set the very last parameter of the config)")
+    exit()
 
 
 # collect all files from a directory (non-recursive)
