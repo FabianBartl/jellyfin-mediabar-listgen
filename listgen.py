@@ -239,7 +239,7 @@ class Interval:
             self.__upper_bound = None
         
         self.__logger.debug(
-            "parsed interval '%s' as interval_type='%s' with lower_bound='%s' and upper_bound='%s'", 
+            "parsed interval '%s' as %s interval from %s to %s", 
             self.__interval, self.__interval_type, self.__lower_bound, self.__upper_bound
         )
     
@@ -255,7 +255,7 @@ class Interval:
         if self.__interval_type == "closed":
             # lower bound higher than upper bound is allowed and inverts the condition
             if self.__lower_bound > self.__upper_bound:
-                return self.__lower_bound >= value or value <= self.__upper_bound
+                return self.__lower_bound <= value or value <= self.__upper_bound
             else:
                 return self.__lower_bound <= value <= self.__upper_bound
         
@@ -470,15 +470,18 @@ class DynamicPlaylist:
         # START OF PARSING FILTERS FOR FILTERING ITEMS OUT
         # ================================================
 
+        # TODO: extract filters like: year, tags, name_startwith, community rating, critics rating, official rating, runtime
         
         # START OF FILTERING ALL COLLECTED ITEMS BASED ON COLLECTED FILTERS LIKE: YEAR, TAGS, RUNTIME, RATING, ETC.
         # =========================================================================================================
         
         item_ids = []
 
-        # TODO: filter by year, tags, name_startwith, community rating, critics rating, official rating, runtime
+        # TODO: filter items by: year, tags, name_startwith, community rating, critics rating, official rating, runtime
+
+        # TEMP        
         item_ids.extend(Toolkit.dict_get_all(all_items, "Id"))
-        
+
         # limit number of items
         self.__logger.debug("limit number of items to %d", self.limit)
         item_ids = item_ids[:self.limit]
