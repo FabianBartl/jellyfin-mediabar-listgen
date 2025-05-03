@@ -39,6 +39,11 @@ A small cli script to quickly and easily get a shell for any pod of any kubernet
 *Written and tested for TrueNAS Scale Dragonfish 24.04*
 
 
+### [jellyfin.css](scripts/jellyfin.css)
+
+Not a script, but just for backup, here is the custom CSS of my Jellyfin server.
+
+
 
 ## Tools
 
