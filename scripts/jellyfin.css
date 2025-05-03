@@ -1,0 +1,93 @@
+
+/*
+Not a script, but just for backup, here is the custom CSS of my Jellyfin server.
+Press Ctrl+Shift+R to fully reload the Jellyfin homepage.
+*/
+
+/* ---------- main theme ---------- */
+
+/* https://github.com/CTalvio/Ultrachromic?tab=readme-ov-file#customization-using-multiple-import-lines */
+@import url('https://cdn.jsdelivr.net/gh/CTalvio/Ultrachromic/presets/kaleidochromic_preset.css');
+@import url('https://cdn.jsdelivr.net/gh/CTalvio/Ultrachromic/progress/floating.css');
+
+
+/* ---------- little customizations ---------- */
+
+/* hide ratings until you hover over them, to prevent biased movie selection behavior */
+.itemMiscInfo > .starRatingContainer,
+.itemMiscInfo > .mediaInfoCriticRating {
+    filter: blur(4px) contrast(0);
+    transition: filter 250ms;
+}
+.nameContainer:hover + .itemMiscInfo > .starRatingContainer,
+.itemMiscInfo:hover > .starRatingContainer,
+.nameContainer:hover + .itemMiscInfo > .mediaInfoCriticRating ,
+.itemMiscInfo:hover > .mediaInfoCriticRating {
+    filter: blur(0) contrast(1);
+}
+
+/* hide rating, shown by the "Media Bar" plugin */
+#slides-container .imdb-logo + span,
+#slides-container .tomato-logo + span,
+#slides-container .critic-logo {
+    filter: blur(3px) contrast(0);
+    transition: filter 250ms;
+}
+#slides-container .rating-value:hover .imdb-logo + span,
+#slides-container .rating-value:hover .tomato-logo + span,
+#slides-container .rating-value:hover .critic-logo {
+    filter: blur(0) contrast(1);
+}
+
+/* hide the "Upcoming" tab on tv-shows page */
+.mainDrawer:has(.navMenuOption-selected[href^="#/tv.html"]) + .skinHeader .emby-tab-button[data-index="2"] {
+    display: none !important;
+}
+
+/* hide the "Trailers" tab on movies page */
+/* https://github.com/BobHasNoSoul/jellyfin-mods?tab=readme-ov-file#hide-the-trailers-tab-from-movie-libraries */
+.mainDrawer:has(.navMenuOption-selected[href^="#/movies.html"]) + .skinHeader .emby-tab-button[data-index="2"] {
+    display: none !important;
+}
+
+/* some changes for the "Media Bar" plugin to fit the main them */
+/* https://github.com/MakD/Jellyfin-Media-Bar */
+#slides-container .play-button {
+    border-radius: 25px !important;
+}
+#slides-container .favorite-button,
+#slides-container .play-text {
+    display: none;
+}
+#slides-container .separator-icon {
+    color: white;
+}
+#slides-container .rating-value,
+#slides-container .runTime,
+#slides-container .date,
+#slides-container .genre {
+    font-family: "Plus Jakarta Sans", sans-serif !important;
+}
+/* fix readability of homepage content when scrolled over the media bar */
+.homeSectionsContainer {
+    backdrop-filter: blur(15px);
+}
+.skinHeader {
+    padding-bottom: 0.5em;
+}
+#slides-container .runTime {
+    flex-wrap: nowrap;
+}
+
+/* hide pre-roll libraries created for the "Cinema Mode" plugin */
+/* https://github.com/CherryFloors/jellyfin-plugin-cinemamode/issues/18 */
+:not(#mediaLibraryPage) [data-id="3862c9622408b2bb528d4603737113a4"], [data-itemid="3862c9622408b2bb528d4603737113a4"],
+:not(#mediaLibraryPage) [data-id="dc9531519b809a4d79d060d3056f3e1a"], [data-itemid="dc9531519b809a4d79d060d3056f3e1a"] {
+    display: none !important;
+}
+
+/* fix not enough space to display last login in user overview */
+.cardText-secondary {
+    height: 5em;
+    font-size: 70%;
+}

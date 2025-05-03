@@ -32,6 +32,14 @@ Slowly re-encode high quality video files into H.265 format to reduce the file s
 [This script](scripts/batch_slow-reencode-to-h265.sh) is a wrapper to process all files of a directory instead of a single file.
 
 
+### [kps.py](scripts/kps.py)
+
+A small cli script to quickly and easily get a shell for any pod of any kubernetes container.
+
+*Written and tested for TrueNAS Scale Dragonfish 24.04*
+
+
+
 ## Tools
 
 ### [MediaBar listgen](tools/mediabar-listgen/README.md)
