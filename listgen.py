@@ -54,8 +54,8 @@ class Toolkit:
     
     @staticmethod
     def match_fuzzy(fuzzy: str, available: Iterable, get_func: Callable, default: Any = None, pattern: re.Pattern = r"[a-z0-9]+") -> Any:
-        mapping = { re.search(pattern, get_func(entry).lower()): entry for entry in available }
-        return mapping.get(re.search(pattern, fuzzy.lower()), default)
+        mapping = { re.findall(pattern, get_func(entry).lower())[0]: entry for entry in available }
+        return mapping.get(re.findall(pattern, fuzzy.lower())[0], default)
 
     
 
@@ -238,9 +238,10 @@ class Interval:
             self.__lower_bound = None
             self.__upper_bound = None
         
+        _is_inverted = "inverted " if self.__lower_bound > self.__upper_bound else ""
         self.__logger.debug(
-            "parsed interval '%s' as %s interval from %s to %s", 
-            self.__interval, self.__interval_type, self.__lower_bound, self.__upper_bound
+            "parsed interval '%s' as %s%s interval from %s to %s", 
+            self.__interval, _is_inverted, self.__interval_type, self.__lower_bound, self.__upper_bound
         )
     
     def __contains__(self, value: Any) -> bool:
@@ -417,7 +418,7 @@ class DynamicPlaylist:
             genre_ids = Toolkit.dict_get_all(genres, "Id")
             get_all_items__url_params["genreIds"] = "|".join(genre_ids)
 
-        self.__logger.debug("include genres: %s", genres)
+        self.__logger.debug("include genres: %s", Toolkit.dict_get_all(genres, "Name"))
 
         # get allowed library types
         library_types = set(["unknown", "movies", "tvshows", "homevideos", "boxsets", "playlists", "folders"])
@@ -430,7 +431,7 @@ class DynamicPlaylist:
 
         # get libraries
         libraries = list(filter(lambda library: library["CollectionType"] in library_types, jellyfin.get_all_libraries()))
-        self.__logger.debug("available libraries: %s", list(zip(Toolkit.dict_get_all(libraries, "Id"), Toolkit.dict_get_all(libraries, "Name"))))
+        self.__logger.debug("available libraries: %s", [ f"{lib['Id']}: {lib['Name']}" for lib in libraries ])
  
         library_ids = set(Toolkit.dict_get_all(libraries, "Id"))
         if (include_library_ids := self.include.get("library_ids")) is not None:
@@ -551,7 +552,7 @@ class Conditional:
                 if (max_parental_rating := user.get("Policy", {}).get("MaxParentalRating")) is not None:
                     # extract age from parental rating label
                     # TODO: support all jellyfin ratings correctly
-                    parental_rating_num = int(re.search(r"[0-9]+", f"0{max_parental_rating}"))
+                    parental_rating_num = int(re.findall(r"[0-9]+", f"0{max_parental_rating}")[0])
                     if not Interval(user_age).is_in_interval(parental_rating_num):
                         return False
     
