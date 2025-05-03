@@ -404,7 +404,6 @@ class DynamicPlaylist:
         jellyfin_genres = jellyfin.get_all_genres()
         self.__logger.debug("available genres: %s", Toolkit.dict_get_all(jellyfin_genres, "Name"))
 
-        # TODO: make it work
         match_genre_name = lambda genre: Toolkit.match_fuzzy(genre, jellyfin_genres, lambda genre: genre["Name"], "")
         
         if (include_genres := self.include.get("genres")) is not None:
