@@ -64,6 +64,10 @@ class Toolkit:
     def match_fuzzy(fuzzy: str, available: Iterable, get_func: Callable, default: Any = None, pattern: re.Pattern = r"[a-z0-9]+") -> Any:
         mapping = { re.findall(pattern, get_func(entry).lower())[0]: entry for entry in available }
         return mapping.get(re.findall(pattern, fuzzy.lower())[0], default)
+    
+    @staticmethod
+    def is_none(value: Any) -> bool:
+        return value is None
 
     
 
@@ -281,7 +285,7 @@ class Interval:
 
 
 class StaticPlaylist:
-    def __init__(self, *, name: str, item_ids: list[str], sort_by: str, sort_ascending: bool, sort_strict: bool):
+    def __init__(self, *, name: str, item_ids: list[str], sort_by: str, sort_ascending: bool, sort_strict: bool, limit: Optional[int] = None):
         self.__logger = logging.getLogger(f"{Path(__file__).stem}.{__class__.__name__}")
 
         self.name = name
@@ -290,9 +294,10 @@ class StaticPlaylist:
         self.raise_for_unsupported_sort_by()
         self.sort_ascending = sort_ascending
         self.sort_strict = sort_strict
+        self.limit = limit
         
     def __repr__(self) -> str:
-        return f"{__class__.__name__}(name={self.name.__repr__()}, item_ids={self.item_ids.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()})"
+        return f"{__class__.__name__}(name={self.name.__repr__()}, item_ids={self.item_ids.__repr__()}, sort_by={self.sort_by.__repr__()}, sort_ascending={self.sort_ascending.__repr__()}, sort_strict={self.sort_strict.__repr__()}, limit={self.limit.__repr__()})"
 
     def raise_for_unsupported_sort_by(self) -> None:
         self.__supported_sort_by = {                                                # data types:
@@ -368,6 +373,13 @@ class StaticPlaylist:
         
         # apply the defined sort function
         items_metadata.sort(key=sort_func, reverse=not self.sort_ascending)
+        self.__logger.debug("sorted items order: %s", Toolkit.dict_get_all(items_metadata, "Name"))
+
+        # limit number of items
+        if self.limit is not None:
+            self.__logger.debug("limit number of items to %d", self.limit)
+            items_metadata = items_metadata[:self.limit]
+
         item_ids = Toolkit.dict_get_all(items_metadata, "Id")
         return item_ids
 
@@ -397,7 +409,7 @@ class DynamicPlaylist:
         # create a static playlist based on a variety of filters
         get_all_items__url_params = {}
 
-        # get allowed item types
+        # get allowed item types list
         item_types = set(["BoxSet", "CollectionFolder", "Episode", "Movie", "Season", "Series", "Video"])
         if (include_item_types := self.include.get("item_types")) is not None:
             item_types &= set(Toolkit.parse_list(include_item_types))
@@ -407,7 +419,7 @@ class DynamicPlaylist:
 
         self.__logger.debug("include item_types: %s", item_types)
 
-        # get genres
+        # get genres list
         genres = None
         jellyfin_genres = jellyfin.get_all_genres()
         self.__logger.debug("available genres: %s", Toolkit.dict_get_all(jellyfin_genres, "Name"))
@@ -427,24 +439,24 @@ class DynamicPlaylist:
 
         self.__logger.debug("include genres: %s", Toolkit.dict_get_all(genres, "Name"))
 
-        # get allowed library types
+        # get allowed library types list
         library_types = set(["unknown", "movies", "tvshows", "homevideos", "boxsets", "playlists", "folders"])
         if (include_library_types := self.include.get("library_types")) is not None:
-            library_types &= set(Toolkit.parse_list(include_library_types))
+            library_types &= set(filter(bool, Toolkit.parse_list(include_library_types)))
         elif (exclude_library_types := self.exclude.get("library_types")) is not None:
-            library_types -= set(Toolkit.parse_list(exclude_library_types))
+            library_types -= set(filter(bool, Toolkit.parse_list(exclude_library_types)))
 
         self.__logger.debug("include library_types: %s", library_types)
 
-        # get libraries
+        # get libraries list
         libraries = list(filter(lambda library: library["CollectionType"] in library_types, jellyfin.get_all_libraries()))
         self.__logger.debug("available libraries: %s", [ f"{lib['Id']}: {lib['Name']}" for lib in libraries ])
  
         library_ids = set(Toolkit.dict_get_all(libraries, "Id"))
         if (include_library_ids := self.include.get("library_ids")) is not None:
-            library_ids &= set(Toolkit.parse_list(include_library_ids))
+            library_ids &= set(filter(bool, Toolkit.parse_list(include_library_ids)))
         elif (exclude_library_ids := self.exclude.get("library_ids")) is not None:
-            library_ids -= set(Toolkit.parse_list(exclude_library_ids))
+            library_ids -= set(filter(bool, Toolkit.parse_list(exclude_library_ids)))
 
         self.__logger.debug("include library_ids: %s", library_ids)
 
@@ -461,7 +473,7 @@ class DynamicPlaylist:
 
         # remove items, to exclude always
         if (exclude_item_ids := self.exclude.get("item_ids")) is not None:
-            exclude_item_ids = set(Toolkit.parse_list(exclude_item_ids))
+            exclude_item_ids = set(filter(bool, Toolkit.parse_list(exclude_item_ids)))
             all_items = list(filter(lambda item: item["Id"] not in exclude_item_ids, all_items))
             self.__logger.debug("exclude item_ids: %s", exclude_item_ids)
 
@@ -470,37 +482,130 @@ class DynamicPlaylist:
         all_items = list(filter(lambda item: item["MediaType"] not in item_types, all_items))
         self.__logger.debug("removed %d items of excluded item type", _len_all_items_before - len(all_items))
 
-        # add item ids, to include always
-        if (include_item_ids := self.include.get("item_ids")) is not None:
-            include_item_ids = Toolkit.parse_list(include_item_ids)
-            self.__logger.debug("include item_ids: %s", include_item_ids)
-        
         # START OF PARSING FILTERS FOR FILTERING ITEMS OUT
         # ================================================
 
-        # TODO: extract filters like: year, tags, name_startwith, community rating, critics rating, official rating, runtime
+        includes = {}
+        excludes = {}
         
-        # START OF FILTERING ALL COLLECTED ITEMS BASED ON COLLECTED FILTERS LIKE: YEAR, TAGS, RUNTIME, RATING, ETC.
-        # =========================================================================================================
+        # get years interval or list
+        if (include_years := self.include.get("years")) is not None:
+            try:
+                includes["years"] = Interval(include_years)
+            except SyntaxError:
+                includes["years"] = list(filter(int, Toolkit.parse_list(include_years)))
+            self.__logger.debug("include years: %s", includes["years"])
+        elif (exclude_years := self.exclude.get("years")) is not None:
+            try:
+                excludes["years"] = Interval(exclude_years)
+            except SyntaxError:
+                excludes["years"] = list(filter(int, Toolkit.parse_list(exclude_years)))
+            self.__logger.debug("exclude years: %s", excludes["years"])
+            
+        # get all list filters
+        list_filter_names = ["tags", "people_ids"]
+        for filter_name in list_filter_names:
+            
+            if (include_filter := self.include.get(filter_name)) is not None:
+                includes[filter_name] = set(filter(bool, Toolkit.parse_list(include_filter)))
+                self.__logger.debug("include %s: %s", filter_name, includes[filter_name])
+            elif (exclude_filter := self.exclude.get(filter_name)) is not None:
+                excludes[filter_name] = set(filter(bool, Toolkit.parse_list(exclude_filter)))
+                self.__logger.debug("exclude %s: %s", filter_name, excludes[filter_name])
+
+        # get all interval filters
+        interval_filter_names = [
+            "startwith_name", "runtime", "people_ids",
+            "community_rating", "critic_rating", "official_rating", "custom_rating",
+        ]
+        for filter_name in interval_filter_names:
+            
+            if (include_filter := self.include.get(filter_name)) is not None:
+                includes[filter_name] = Interval(include_filter)
+                self.__logger.debug("include %s: %s", filter_name, includes[filter_name])
+            elif (exclude_filter := self.exclude.get(filter_name)) is not None:
+                excludes[filter_name] = Interval(exclude_filter)
+                self.__logger.debug("exclude %s: %s", filter_name, excludes[filter_name])
         
+        self.__logger.debug("%d include filters set", len(includes))
+        self.__logger.debug("%d exclude filters set", len(excludes))
+        
+        # START OF FILTERING ALL COLLECTED ITEMS BASED ON COLLECTED FILTERS LIKE: YEAR, TAGS, RUNTIME, RATINGS, ETC.
+        # ==========================================================================================================
+
+        filter_name_get_func = {
+            "years":            lambda item: item.get("ProductionYear"),
+            "tags":             lambda item: item.get("Tags"),
+            "startwith_name":   lambda item: item.get("Name"),
+            "runtime":          lambda item: item.get("RunTimeTicks"),
+            "people_ids":       lambda item: None if len(_ids := Toolkit.dict_get_all(item.get("People", []), "Id", discard=True)) == 0 else _ids,
+            "community_rating": lambda item: item.get("CommunityRating"),
+            "critic_rating":    lambda item: item.get("CriticRating"),
+            "official_rating":  lambda item: item.get("OfficialRating"),
+            "custom_rating":    lambda item: item.get("CustomRating"),
+        }
+
+        # collect all items, where their specific values are contained in the specific include filter value
+        included_items = []
+        for item in all_items:
+            for filter_name, filter_value in includes.items():
+                # get function of specific filter that extracts the value from the item dict
+                if (get_func := filter_name_get_func.get(filter_name)) is None:
+                    self.__logger.warning("no getter function found for filter name: %s", filter_name)
+                    continue
+                # get the value of the filter from the item dict
+                if (item_value := get_func(item)) is None:
+                    self.__logger.debug("skip item without %s value", filter_name)
+                    continue
+                # check if filter value contains value of item (only works, because all filters are of type list, set or Interval)
+                if item_value in filter_value:
+                    self.__logger.debug("include item %s", item["Name"])
+                    included_items.append(item)
+
+        _len_included_items_before = len(included_items)
+        self.__logger.debug("included %d items", _len_included_items_before)
+
+        # remove all items, where their specific values are contained in the specific exclude filter value
+        excluded_items = []
+        for item in included_items:
+            for filter_name, filter_value in excludes.items():
+                # get function of specific filter that extracts the value from the item dict
+                if (get_func := filter_name_get_func.get(filter_name)) is None:
+                    self.__logger.warning("no getter function found for filter name: %s", filter_name)
+                    continue
+                # get the value of the filter from the item dict
+                if (item_value := get_func(item)) is None:
+                    self.__logger.debug("skip item without %s value", filter_name)
+                    continue
+                # check if filter value not contains value of item (only works, because all filters are of type list, set or Interval)
+                if item_value not in filter_value:
+                    self.__logger.debug("exclude item %s", item["Name"])
+                    excluded_items.append(item)
+
+        self.__logger.debug("excluded %d items", len(excluded_items))
+        
+        # get item ids
         item_ids = []
-
-        # TODO: filter items by: year, tags, name_startwith, community rating, critics rating, official rating, runtime
-
-        # TEMP        
-        item_ids.extend(Toolkit.dict_get_all(all_items, "Id"))
-
-        # limit number of items
-        self.__logger.debug("limit number of items to %d", self.limit)
-        item_ids = item_ids[:self.limit]
+        item_ids.extend( set(Toolkit.dict_get_all(included_items, "Id")) - set(Toolkit.dict_get_all(excluded_items, "Id")) )
         
-        # create static playlist of all item ids left
+        # add item ids, to include always
+        if (include_item_ids := self.include.get("item_ids")) is not None:
+            include_item_ids = list(filter(bool, Toolkit.parse_list(include_item_ids)))
+            item_ids.extend(include_item_ids)
+            self.__logger.debug("include item_ids: %s", include_item_ids)
+
+        # remove duplicate ids
+        item_ids = list(set(item_ids))
+        self.__logger.debug("after all filters, collected %d items", len(item_ids))
+                
+        # create static playlist of all item ids
         new_playlist = StaticPlaylist(
             name = self.name,
             item_ids = item_ids,
             sort_by = self.sort_by,
             sort_ascending = self.sort_ascending,
             sort_strict = self.sort_strict,
+            limit = self.limit,
         )
         self.__logger.debug(
             "created static playlist '%s' with %d items",
@@ -634,7 +739,7 @@ class MediaBar:
             elif _type == "dynamic":
                 new_playlist = DynamicPlaylist(
                     name = name,
-                    limit = items.get("limit", 20),
+                    limit = items.get("limit", 10),
                     include = items.get("include", {}),
                     exclude = items.get("exclude", {}),
                     sort_by = entry.get("sort_by", "order"),
@@ -670,7 +775,6 @@ class MediaBar:
     
     def evaluate(self, jellyfin: Jellyfin, *, user_id: Optional[str] = None) -> tuple[str, list[str]]:
         # evaluates the whole imported config and returns the selected playlist name and sorted playlist item ids
-        # TODO: if user_id is set, user-based Conditionals can be checked too
         conditional = self.get_selected(jellyfin=jellyfin, user_id=user_id)
         playlist = self.get_playlist(conditional.name)
         static_playlist = playlist.compile(jellyfin) if isinstance(playlist, DynamicPlaylist) else playlist

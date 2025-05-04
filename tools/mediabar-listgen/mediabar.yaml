@@ -1,7 +1,6 @@
 selection:
-  - name: Thrillers of the 90s
+  - name: top 5 thrillers of the 90s          # the lowercase name is matched
     disabled: false              # entry can be easily disabled
-    user_age: 16-
     # hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
   
   - name: Featured              # no condition, so it will be selected if none of the previous conditions are met
@@ -22,19 +21,17 @@ playlists:
         - 18463206e2ec10d3a8ec9ad532a3226f    # codename uncle
         - f2aacf8048b6323c1e770a8ef503b118    # babylon berlin
 
-  - name: Thrillers of the 90s
-    sort_by: ProductionYear
+  - name: Top 5 Thrillers of the 90s
+    sort_by: CommunityRating
+    sort_ascending: false                           # default true
     items:
       type: dynamic
-      limit: 15                               # default: 20
+      limit: 5                                      # default: 10
       include:
-        production_year: 1990 - 1999
-        genres: thriller                 # condition is met, if any genre is matched
-        item_ids: 3ce8a38751d766d2637b51349bff34d6
-        item_types: Movie                  # default: Movie, Series
+        years: 1990 - 1999                          # can be an Interval or list
+        genres: thriller                            # condition is met, if any genre of this list is matched
+        item_types: Movie                           # default: Movie, Series
       exclude:
-        # genres: mystery
-        item_ids: 4b1cb2cde4a2fb17f3e0fd5f0098a5f2    # 23 Nichts ist so wie es scheint
         library_ids:
           # pre-roll libs
           - 3862c9622408b2bb528d4603737113a4
