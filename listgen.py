@@ -2,8 +2,8 @@
 """
 License: MIT
 Author: Fabian Bartl
-Repository: https://github.com/FabianBartl/jellyfin-scripts
-Last update: 2025-05-03
+Repository: https://github.com/FabianBartl/jellyfin-mediabar-listgen
+Last update: 2025-05-05
 """
 
 

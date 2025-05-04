@@ -1,5 +1,5 @@
 
-# MediaBar listgen
+# Jellyfin MediaBar listgen
 
 A Python script to generate a simple list of item IDs based on a variety of conditions and filters. The resulting list.txt file can be used by the [Jellyfin MediaBar Plugin](https://github.com/MakD/Jellyfin-Media-Bar).
 
