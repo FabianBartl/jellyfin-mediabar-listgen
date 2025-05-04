@@ -48,11 +48,12 @@ from typing_extensions import Self
 """################### START OF USER CONFIG ###################"""
 
 # the folder where all the files are, note that the script does not expect nested input files
-INPUT_FOLDER: Path = Path(r"C:\Users\fabia\Downloads\rookie")
+INPUT_FOLDER: Path = Path(r"C:\Users\fabia\Downloads")
 
 # this just renames the input files if needed, but it should normalize the series-episode marker, title and language marker
 # https://regex101.com/r/kloyKZ/2
 # 'The Rookie-100 Tage Rookie (S01_E14) (Englisch)-0851818866.mp4' -> 'The Rookie - 100 Tage Rookie S01E14 [ÖRR] [1080p] [LANG-Englisch].mp4'
+# 'The Rookie-100 Tage Rookie (S01_E14)-0851818866.mp4' -> 'The Rookie - 100 Tage Rookie S01E14 [ÖRR] [1080p] [LANG-].mp4'
 FILE_RENAME_PATTERN = {
     "pattern": r"^(?P<series>[^\-]+)-(?P<title>[^\(]+) \(S(?P<season>\d+)_E(?P<episode>\d+)\)(?: \((?P<lang>[^)]+)\))?-\d+(?P<ext>\..+)$",
     "repl": r"\g<series> - \g<title> S\g<season>E\g<episode>" + " [ÖRR] [1080p]" + r" [LANG-\g<lang>]\g<ext>",
