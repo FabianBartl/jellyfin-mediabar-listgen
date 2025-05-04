@@ -27,7 +27,7 @@ To be able to automatically find the related files, they need to follow certain 
 The config comes after all the imports and each option is described. The order of the config itself is not importent, but it is by default in order of file processing.
 
 
-### [update-trailer.py](scripts/update-trailers.py)
+### [update-trailers.py](scripts/update-trailers.py)
 
 1. **Option: _add_new_trailers = True**
 
