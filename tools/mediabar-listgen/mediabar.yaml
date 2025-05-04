@@ -1,9 +1,15 @@
 selection:
   - name: top 5 thrillers of the 90s          # the lowercase name is matched
     disabled: false              # entry can be easily disabled
-    # hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
+    hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
   
-  - name: Featured              # no condition, so it will be selected if none of the previous conditions are met
+  - name: Featured
+  
+  - name: way to long movies
+
+  - name: Mid rated DVDs
+  
+  - name: latest              # no condition, so it will be selected if none of the previous conditions are met
 
   - name: all                   # no condition, but it is not selected because the previous one is already selected;
                                 # if none of the previous conditions are met, the last will be selected
@@ -30,50 +36,59 @@ playlists:
       include:
         years: 1990 - 1999                          # can be an Interval or list
         genres: thriller                            # condition is met, if any genre of this list is matched
-        item_types: Movie                           # default: Movie, Series
       exclude:
+        item_types: Episode
         library_ids:
           # pre-roll libs
           - 3862c9622408b2bb528d4603737113a4
           - dc9531519b809a4d79d060d3056f3e1a
  
   - name: Mid rated DVDs
-    sort_by: random
+    sort_by: CommunityRating
     items:
       type: dynamic
       include:
-        tags: dvd                      # i gave all DVDs this tag in my library
-        community_rating: 6 - 7        # i decided to use always this range syntax, to support very specific conditions
-        critics_rating: 60 - 70        # every condition must be met for any item to be selected, therefore both rating formats must be met
-        limit: 10                      # limit to 10 results
-        library_ids:
-          - 7a2175bccb1f1a94152cbd2b2bae8f6d    # include movies library
+        # TODO: tags not working
+        tags: dvd                       # i gave all DVDs this tag in my library
+        community_rating: 6 - 7
+        critic_rating: 60 - 70          # every condition must be met for any item to be selected, therefore both ratings must be satisfied
+        limit: 10
       exclude:
+        item_types: Episode
         library_ids:
           # pre-roll libs
           - 3862c9622408b2bb528d4603737113a4
           - dc9531519b809a4d79d060d3056f3e1a
 
   - name: Way to long movies
-    sort_by: name
+    sort_by: Name
     items:
       type: dynamic
       include:
-        runtime: "3:00 -"       # format is HH:MM  (upper or lower range limit can be omitted for range syntax, but the separator must be present)
+        runtime: "170 -"        # longer than 150 minutes (2 hours 50 minutes)
+      exclude:
+        item_types: Episode     # better exclude Episode, than including Movie and AggregateFolder, CollectionFolder, ...
   
   - name: Latest
-    sort_by: creation_date
-    sort_ascending: false
+    sort_by: DateCreated        # TODO: make this sort_by work
+    sort_ascending: true
     items:
       type: dynamic
       limit: 10
+      exclude:
+        item_types: Episode
+        library_ids:
+          # pre-roll libs
+          - 3862c9622408b2bb528d4603737113a4
+          - dc9531519b809a4d79d060d3056f3e1a
 
   - name: all
     sort_by: random
     items:
       type: dynamic           # no filter, so everything is selected
-      limit: 30               # but should be limited
+      # limit: null             # default limit is 10, null disables the limit (not recommended)
       exclude:
+        item_types: Episode
         library_ids:
           # pre-roll libs
           - 3862c9622408b2bb528d4603737113a4

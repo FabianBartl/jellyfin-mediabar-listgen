@@ -16,6 +16,7 @@ import yaml
 import json
 import random
 import re
+import time
 import datetime as dt
 import uuid
 import socket
@@ -25,7 +26,9 @@ from pprint import pprint
 from typing import Any, Optional, Union, Callable, Iterable
 from tqdm import tqdm
 
-
+from colorama import init as colorama_init
+from colorama import Fore, Back, Style
+colorama_init(autoreset=True)
 
 
 class Toolkit:
@@ -68,8 +71,25 @@ class Toolkit:
     @staticmethod
     def is_none(value: Any) -> bool:
         return value is None
-
     
+    @staticmethod
+    def limit(items: Union[list,set], limit: Optional[int] = None, logger: Optional[logging.Logger] = None) -> list:
+        if limit is None:
+            return items
+        if isinstance(logger, logging.Logger):
+            logger.debug("limit number of items to %d", limit)
+        return list(items)[:limit]
+
+    @staticmethod
+    def contains_any(setlike: Iterable, setlike_or_element: Union[Iterable, Any]) -> bool:
+        if isinstance(setlike_or_element, (set, list, Iterable)):
+            for element in set(setlike_or_element):
+                if element in setlike:
+                    return True
+            return False
+        return setlike_or_element in setlike
+
+
 
 class Jellyfin:
     def __init__(self, *, server_url: str, username: str, password: str, headers: dict = {}):
@@ -131,7 +151,7 @@ class Jellyfin:
     def get_item(self, item_id: str) -> dict:
         return self.get(Toolkit.join_url("Users", self.__user_id, "Items", item_id))
 
-    def get_items(self, item_ids: list[str], batch_size: int = 40) -> list[dict]:
+    def get_items(self, item_ids: list[str], batch_size: int = 60) -> list[dict]:
         items = []
         # split up item ids into chunks to prevent to long urls
         item_ids_chunks = [ item_ids[ind:ind+batch_size] for ind in range(0, len(item_ids), batch_size) ]
@@ -153,13 +173,17 @@ class Jellyfin:
 class Interval:
     def __init__(self, interval: str):
         self.__logger = logging.getLogger(f"{Path(__file__).stem}.{__class__.__name__}")
-        self.__interval = interval
+        self.__interval = str(interval)
         self.__parse_interval()
     
     def __repr__(self) -> str:
         return f"{__class__.__name__}(interval={self.__interval.__repr__()})"
 
     def __parse_interval(self) -> None:
+        self.__data_type = None
+        self.__lower_bound = None
+        self.__upper_bound = None
+
         numeric_pattern = r"[0-9]+(\.[0-9]+)?"
         alphabetic_pattern = r"[a-z]+"
         date_pattern = r"[0-9]{4}_[0-9]{2}_[0-9]{2}"    # YYYY_MM_DD    (does not validate the date itself!)
@@ -179,6 +203,8 @@ class Interval:
             self.__interval_type = "exact"
         else:
             raise SyntaxError("Expected format: 'any-any' or 'any-' or '-any' or '-' or 'any'")
+        
+        self.__logger.debug("matched %s interval type", self.__interval_type)
 
         # TODO: re-work the following using match-case syntax
         # https://stackoverflow.com/questions/74713626/how-to-use-structural-pattern-matching-match-case-with-regex
@@ -194,6 +220,7 @@ class Interval:
         date_lower_bound = re.fullmatch(date_pattern, lower_bound)
         date_upper_bound = re.fullmatch(date_pattern, upper_bound)
         
+        _is_inverted = False
         if self.__interval_type == "closed":
             if numeric_lower_bound:
                 if numeric_upper_bound:
@@ -218,6 +245,7 @@ class Interval:
                     raise TypeError(f"Expected date data type for upper bound: {upper_bound}")
             else:
                 raise TypeError(f"Expected same data type numeric, alphabetic or date for lower bound ({lower_bound}) and upper bound ({upper_bound}).")
+            _is_inverted = self.__lower_bound > self.__upper_bound
             
         elif self.__interval_type == "left-open":
             if numeric_upper_bound:
@@ -250,10 +278,11 @@ class Interval:
             self.__lower_bound = None
             self.__upper_bound = None
         
-        _is_inverted = "inverted " if self.__lower_bound > self.__upper_bound else ""
+        self.__logger.debug("matched %s data type", self.__data_type)
+
         self.__logger.debug(
             "parsed interval '%s' as %s%s interval from %s to %s", 
-            self.__interval, _is_inverted, self.__interval_type, self.__lower_bound, self.__upper_bound
+            self.__interval, "inverted" if _is_inverted else "", self.__interval_type, self.__lower_bound, self.__upper_bound
         )
     
     def __contains__(self, value: Any) -> bool:
@@ -315,11 +344,12 @@ class StaticPlaylist:
         
         match self.sort_by:
             case "order":
-                return self.item_ids[:] if self.sort_ascending else self.item_ids[::-1]
+                item_ids = self.item_ids[:] if self.sort_ascending else self.item_ids[::-1]
+                return Toolkit.limit(item_ids, self.limit, self.__logger)
             case "random":
                 item_ids = self.item_ids[:]
                 random.shuffle(item_ids)
-                return item_ids
+                return Toolkit.limit(item_ids, self.limit, self.__logger)
         
         # request item metadata from jellyfin
         items_metadata = jellyfin.get_items(self.item_ids)
@@ -373,13 +403,9 @@ class StaticPlaylist:
         
         # apply the defined sort function
         items_metadata.sort(key=sort_func, reverse=not self.sort_ascending)
-        self.__logger.debug("sorted items order: %s", Toolkit.dict_get_all(items_metadata, "Name"))
-
-        # limit number of items
-        if self.limit is not None:
-            self.__logger.debug("limit number of items to %d", self.limit)
-            items_metadata = items_metadata[:self.limit]
-
+        items_metadata = Toolkit.limit(items_metadata, self.limit, self.__logger)
+        self.__logger.debug("sorted items order: %s", [ f"{item['Id']}: {item['Name']}" for item in items_metadata ])
+        
         item_ids = Toolkit.dict_get_all(items_metadata, "Id")
         return item_ids
 
@@ -409,17 +435,17 @@ class DynamicPlaylist:
         # create a static playlist based on a variety of filters
         get_all_items__url_params = {}
 
-        # get allowed item types list
-        item_types = set(["BoxSet", "CollectionFolder", "Episode", "Movie", "Season", "Series", "Video"])
+        # get allowed item types list to include by default all
+        item_types = set(map(str.lower, ["AggregateFolder", "BoxSet", "CollectionFolder", "Episode", "Movie", "Season", "Series", "Video"]))
         if (include_item_types := self.include.get("item_types")) is not None:
-            item_types &= set(Toolkit.parse_list(include_item_types))
+            item_types &= set(map(str.lower, Toolkit.parse_list(include_item_types)))
         elif (exclude_item_types := self.exclude.get("item_types")) is not None:
-            item_types -= set(Toolkit.parse_list(exclude_item_types))
+            item_types -= set(map(str.lower, Toolkit.parse_list(exclude_item_types)))
         get_all_items__url_params["includeItemTypes"] = ",".join(item_types)
 
         self.__logger.debug("include item_types: %s", item_types)
 
-        # get genres list
+        # get genres list to include by default all
         genres = None
         jellyfin_genres = jellyfin.get_all_genres()
         self.__logger.debug("available genres: %s", Toolkit.dict_get_all(jellyfin_genres, "Name"))
@@ -434,22 +460,22 @@ class DynamicPlaylist:
 
         if genres is not None and genres is not []:
             genres = list(genres)
-            genre_ids = Toolkit.dict_get_all(genres, "Id")
-            get_all_items__url_params["genreIds"] = "|".join(genre_ids)
+            get_all_items__url_params["genreIds"] = "|".join(Toolkit.dict_get_all(genres, "Id"))
+            self.__logger.debug("include genres: %s", Toolkit.dict_get_all(genres, "Name"))
 
-        self.__logger.debug("include genres: %s", Toolkit.dict_get_all(genres, "Name"))
+        # get allowed library types list to include by default all
+        library_types = set(map(str.lower, ["unknown", "movies", "tvshows", "homevideos", "boxsets", "playlists", "folders"]))
+        self.__logger.debug("available library types: %s", library_types)
 
-        # get allowed library types list
-        library_types = set(["unknown", "movies", "tvshows", "homevideos", "boxsets", "playlists", "folders"])
         if (include_library_types := self.include.get("library_types")) is not None:
-            library_types &= set(filter(bool, Toolkit.parse_list(include_library_types)))
+            library_types &= set(map(str.lower, filter(bool, Toolkit.parse_list(include_library_types))))
         elif (exclude_library_types := self.exclude.get("library_types")) is not None:
-            library_types -= set(filter(bool, Toolkit.parse_list(exclude_library_types)))
+            library_types -= set(map(str.lower, filter(bool, Toolkit.parse_list(exclude_library_types))))
 
         self.__logger.debug("include library_types: %s", library_types)
 
-        # get libraries list
-        libraries = list(filter(lambda library: library["CollectionType"] in library_types, jellyfin.get_all_libraries()))
+        # get libraries list to include by default all
+        libraries = list(filter(lambda library: library["CollectionType"].lower() in library_types, jellyfin.get_all_libraries()))
         self.__logger.debug("available libraries: %s", [ f"{lib['Id']}: {lib['Name']}" for lib in libraries ])
  
         library_ids = set(Toolkit.dict_get_all(libraries, "Id"))
@@ -466,7 +492,8 @@ class DynamicPlaylist:
         # get all items from all filtered libraries
         all_items = []
         for library_id in library_ids:
-            new_items = jellyfin.get_all_items(parentId=library_id, **get_all_items__url_params)
+            new_items = jellyfin.get_all_items(parentId=library_id, filters="IsNotFolder", **get_all_items__url_params)
+            self.__logger.debug("fetched %d items from library id %s", len(new_items), library_id)
             all_items.extend(new_items)
         
         self.__logger.debug("fetched %d items", len(all_items))
@@ -479,7 +506,8 @@ class DynamicPlaylist:
 
         # remove items of excluded item type
         _len_all_items_before = len(all_items)
-        all_items = list(filter(lambda item: item["MediaType"] not in item_types, all_items))
+        
+        all_items = list(filter(lambda item: item.get("MediaType", "").lower() in item_types or item.get("Type", "").lower(), all_items))
         self.__logger.debug("removed %d items of excluded item type", _len_all_items_before - len(all_items))
 
         # START OF PARSING FILTERS FOR FILTERING ITEMS OUT
@@ -507,10 +535,10 @@ class DynamicPlaylist:
         for filter_name in list_filter_names:
             
             if (include_filter := self.include.get(filter_name)) is not None:
-                includes[filter_name] = set(filter(bool, Toolkit.parse_list(include_filter)))
+                includes[filter_name] = set(map(str.lower, filter(bool, Toolkit.parse_list(include_filter))))
                 self.__logger.debug("include %s: %s", filter_name, includes[filter_name])
             elif (exclude_filter := self.exclude.get(filter_name)) is not None:
-                excludes[filter_name] = set(filter(bool, Toolkit.parse_list(exclude_filter)))
+                excludes[filter_name] = set(map(str.lower, filter(bool, Toolkit.parse_list(exclude_filter))))
                 self.__logger.debug("exclude %s: %s", filter_name, excludes[filter_name])
 
         # get all interval filters
@@ -521,10 +549,10 @@ class DynamicPlaylist:
         for filter_name in interval_filter_names:
             
             if (include_filter := self.include.get(filter_name)) is not None:
-                includes[filter_name] = Interval(include_filter)
+                includes[filter_name] = Interval(str(include_filter).lower())
                 self.__logger.debug("include %s: %s", filter_name, includes[filter_name])
             elif (exclude_filter := self.exclude.get(filter_name)) is not None:
-                excludes[filter_name] = Interval(exclude_filter)
+                excludes[filter_name] = Interval(str(exclude_filter).lower())
                 self.__logger.debug("exclude %s: %s", filter_name, excludes[filter_name])
         
         self.__logger.debug("%d include filters set", len(includes))
@@ -537,7 +565,7 @@ class DynamicPlaylist:
             "years":            lambda item: item.get("ProductionYear"),
             "tags":             lambda item: item.get("Tags"),
             "startwith_name":   lambda item: item.get("Name"),
-            "runtime":          lambda item: item.get("RunTimeTicks"),
+            "runtime":          lambda item: None if (ticks := item.get("RunTimeTicks")) is None else ticks / 10_000_000 / 60,
             "people_ids":       lambda item: None if len(_ids := Toolkit.dict_get_all(item.get("People", []), "Id", discard=True)) == 0 else _ids,
             "community_rating": lambda item: item.get("CommunityRating"),
             "critic_rating":    lambda item: item.get("CriticRating"),
@@ -546,41 +574,47 @@ class DynamicPlaylist:
         }
 
         # collect all items, where their specific values are contained in the specific include filter value
-        included_items = []
-        for item in all_items:
-            for filter_name, filter_value in includes.items():
-                # get function of specific filter that extracts the value from the item dict
-                if (get_func := filter_name_get_func.get(filter_name)) is None:
-                    self.__logger.warning("no getter function found for filter name: %s", filter_name)
-                    continue
-                # get the value of the filter from the item dict
-                if (item_value := get_func(item)) is None:
-                    self.__logger.debug("skip item without %s value", filter_name)
-                    continue
-                # check if filter value contains value of item (only works, because all filters are of type list, set or Interval)
-                if item_value in filter_value:
-                    self.__logger.debug("include item %s", item["Name"])
-                    included_items.append(item)
+        if len(includes) != 0:
+            included_items = []
+            for item in all_items:
+                self.__logger.debug("check item for includes: %s", item["Name"])
+                for filter_name, filter_value in includes.items():
+                    # get function of specific filter that extracts the value from the item dict
+                    if (get_func := filter_name_get_func.get(filter_name)) is None:
+                        self.__logger.warning("no getter function found for filter name: %s", filter_name)
+                        continue
+                    # get the value of the filter from the item dict
+                    if (item_value := get_func(item)) is None:
+                        self.__logger.debug("skip item without %s value", filter_name)
+                        continue
+                    # check if filter value contains value of item (only works, because all filters are of type list, set or Interval)
+                    if Toolkit.contains_any(filter_value, item_value):
+                        self.__logger.debug("include item %s", item["Name"])
+                        included_items.append(item)
+        else:
+            included_items = all_items
 
         _len_included_items_before = len(included_items)
         self.__logger.debug("included %d items", _len_included_items_before)
 
         # remove all items, where their specific values are contained in the specific exclude filter value
         excluded_items = []
-        for item in included_items:
-            for filter_name, filter_value in excludes.items():
-                # get function of specific filter that extracts the value from the item dict
-                if (get_func := filter_name_get_func.get(filter_name)) is None:
-                    self.__logger.warning("no getter function found for filter name: %s", filter_name)
-                    continue
-                # get the value of the filter from the item dict
-                if (item_value := get_func(item)) is None:
-                    self.__logger.debug("skip item without %s value", filter_name)
-                    continue
-                # check if filter value not contains value of item (only works, because all filters are of type list, set or Interval)
-                if item_value not in filter_value:
-                    self.__logger.debug("exclude item %s", item["Name"])
-                    excluded_items.append(item)
+        if len(excludes) != 0:
+            for item in included_items:
+                self.__logger.debug("check item for excludes: %s", item["Name"])
+                for filter_name, filter_value in excludes.items():
+                    # get function of specific filter that extracts the value from the item dict
+                    if (get_func := filter_name_get_func.get(filter_name)) is None:
+                        self.__logger.warning("no getter function found for filter name: %s", filter_name)
+                        continue
+                    # get the value of the filter from the item dict
+                    if (item_value := get_func(item)) is None:
+                        self.__logger.debug("skip item without %s value", filter_name)
+                        continue
+                    # check if filter value not contains value of item (only works, because all filters are of type list, set or Interval)
+                    if not Toolkit.contains_any(filter_value, item_value):
+                        self.__logger.debug("exclude item %s", item["Name"])
+                        excluded_items.append(item)
 
         self.__logger.debug("excluded %d items", len(excluded_items))
         
@@ -739,7 +773,7 @@ class MediaBar:
             elif _type == "dynamic":
                 new_playlist = DynamicPlaylist(
                     name = name,
-                    limit = items.get("limit", 10),
+                    limit = int(items.get("limit", 10)),
                     include = items.get("include", {}),
                     exclude = items.get("exclude", {}),
                     sort_by = entry.get("sort_by", "order"),
@@ -803,4 +837,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    t0 = time.time()
     main()
+    t1 = time.time()
+    
+    print(f"this took {t1-t0:.4f} seconds")
