@@ -3,7 +3,8 @@
 Imagine you have many episoded of a tv show, but the subtitles are not embedded and instead of one video file
 with multiple audio tracks, there are multiple video files with one audio track each.
 
-This script will combine the video with all audio and subtitle languages present into a single file.
+This script will combine the video with all audio and subtitle languages present into a single file without
+re-encoding anything.
 
 To be able to automatically find the related files, they need to follow certain naming rules, that can be configured
 using regular expressions. The regex can look quite complex, so next to each such config is a regex101.com link that
@@ -28,6 +29,15 @@ except ImportError:
     if not ttml_to_srt_unsupported:
         import ttml2srt
 
+try:
+    # pip install colorama
+    from colorama import init as colorama_init
+    from colorama import Fore, Back, Style
+    colorama_init(autoreset=True)
+    colored_ffmpeg = True
+except ImportError:
+    colored_ffmpeg = False
+
 import re
 import os
 from pathlib import Path
@@ -38,7 +48,7 @@ from typing_extensions import Self
 """################### START OF USER CONFIG ###################"""
 
 # the folder where all the files are, note that the script does not expect nested input files
-INPUT_FOLDER: Path = Path(r"C:\Users\fabia\Downloads\r")
+INPUT_FOLDER: Path = Path(r"C:\Users\fabia\Downloads\rookie")
 
 # this just renames the input files if needed, but it should normalize the series-episode marker, title and language marker
 # https://regex101.com/r/kloyKZ/2
@@ -46,6 +56,11 @@ INPUT_FOLDER: Path = Path(r"C:\Users\fabia\Downloads\r")
 FILE_RENAME_PATTERN = {
     "pattern": r"^(?P<series>[^\-]+)-(?P<title>[^\(]+) \(S(?P<season>\d+)_E(?P<episode>\d+)\)(?: \((?P<lang>[^)]+)\))?-\d+(?P<ext>\..+)$",
     "repl": r"\g<series> - \g<title> S\g<season>E\g<episode>" + " [ÖRR] [1080p]" + r" [LANG-\g<lang>]\g<ext>",
+}
+# you can skip renaming with this regex:
+FILE_RENAME_PATTERN = {
+    "pattern": r"^(?P<filename>.+)$",
+    "repl": r"\g<filename>",
 }
 
 # all files from the input folder will be renamed by this, so if you mess up the regex, you will need to revert the renaming
@@ -61,14 +76,22 @@ COMMON_EPISODE_PATTERN = r"S\d+E\d+"
 # see: https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes
 # the language of a file is matched by this regex: https://regex101.com/r/CFxbag/1
 COMMON_LANGUAGE_PATTERN = r"\[LANG-([^\]]*)\]"
-# and will be replaced by their 3-letter code for setting the track language by this mapping:
+# if you only have one language, you can set this variable to None
+COMMON_LANGUAGE_PATTERN = None
+
+# the matched language will be replaced by their 3-letter code for setting the track language by this mapping:
 # in my case are the unmarked files in germann (deu) and the english (eng) ones marked with 'Englisch'
 LANGUAGE_MAP = {
     "": "deu",
     "Englisch": "eng",
 }
+# if COMMON_LANGUAGE_PATTERN is None, use this map and replace the 3-letter code by yours
+LANGUAGE_MAP = {
+    "": "deu",
+}
 
-# the 3-letter code or None of the audio and subtitle track that should be set to default if present 
+# the 3-letter code or None of the audio and subtitle track that should be set to default if present
+# you should always set a default audio language
 DEFAULT_AUDIO_LANG = "deu"
 DEFAULT_SUBTITLE_LANG = None
 
@@ -84,7 +107,7 @@ OUTPUT_RENAME_PATTERN = {
 }
 
 # should the ffmpeg command be executed or just shown?
-FFMPEG_EXECUTE = True
+FFMPEG_EXECUTE = False
 # the command or location of the ffmpeg binary
 FFMPEG_BIN = r"ffmpeg"
 # append the -y option to the ffmpeg command?
@@ -122,8 +145,8 @@ for file in all_files[:]:
 COMMON_EPISODE_PATTERN = r"S\d+E\d+"
 related_episodes = {}
 for file in renamed_files:
-    if (common_match := re.findall(COMMON_EPISODE_PATTERN, file.stem)[0]) is not None:
-        related_episodes.update({ common_match: related_episodes.get(common_match, []) + [file] })
+    if len(common_match := re.findall(COMMON_EPISODE_PATTERN, file.stem)) > 0:
+        related_episodes.update({ common_match[0]: related_episodes.get(common_match[0], []) + [file] })
 pprint(related_episodes)
 
 
@@ -134,8 +157,12 @@ for episode, files in list(related_episodes.items()):
     related_languages = {}
     for file in files:
         
-        if (common_match := re.findall(COMMON_LANGUAGE_PATTERN, file.stem)[0]) is not None:
-            lang = LANGUAGE_MAP[common_match]
+        if COMMON_LANGUAGE_PATTERN is not None:
+            if len(common_match := re.findall(COMMON_LANGUAGE_PATTERN, file.stem)) > 0:
+                lang = LANGUAGE_MAP[common_match[0]]
+                related_languages.update({ lang: related_languages.get(lang, []) + [file] })
+        else:
+            lang = LANGUAGE_MAP[""]
             related_languages.update({ lang: related_languages.get(lang, []) + [file] })
 
     related_episodes[episode] = related_languages
@@ -144,8 +171,8 @@ pprint(related_episodes)
 
 # group all language files by file type
 supported_filetypes = {
-    "video": {"mp4", "mkv"},
-    "audio": {"mp3", "m4a"},
+    "video": {"mp4", "mkv", "webm"},
+    "audio": {"mp3", "m4a", "weba"},
     "subtitle": {"srt"},
 }
 for episode, languages in list(related_episodes.items()):
@@ -248,16 +275,17 @@ class Counters:
 
 
 class FFmpeg:
-    def __init__(self, *, ffmpeg_bin: str = "ffmpeg", yes: bool = False) -> Self:
-        self.yes = yes
-        self.__ffmpeg_bin = ffmpeg_bin
-        self.__inputs = []
-        self.__arguments = []
-        self.__output = []
+    def __init__(self, *, ffmpeg_bin: str = "ffmpeg", yes: bool = False, colored_echo: bool = False) -> Self:
+        self.yes: bool = yes
+        self.colored_echo: bool = colored_echo
+        self.__ffmpeg_bin: str = ffmpeg_bin
+        self.__inputs: list[str] = []
+        self.__arguments: list[str] = []
+        self.__output: list[str] = []
 
     @staticmethod
     def escape_path(path: Path) -> str:
-        path = re.sub(r"\\+", "/", str(path))
+        path = re.sub(r"\\+", "/", str(path))       # basically convert windows path to linux path
         return f'"{path}"'
     
     def option(self, key: str, value: Optional[str] = None, *, _type: str = "argument") -> Self:
@@ -284,6 +312,20 @@ class FFmpeg:
         self.__output.append(self.escape_path(file.absolute()))
         return self
 
+    def echo(self) -> str:
+        if not self.colored_echo:
+            return " ".join(self.build())
+
+        arguments = []
+        reset = Fore.RESET + Back.RESET + Style.RESET_ALL
+        arguments.extend([ Style.BRIGHT + self.__ffmpeg_bin + reset])
+        arguments.extend([ Fore.CYAN + arg + reset for arg in self.__inputs ])
+        arguments.extend([ Fore.GREEN + arg + reset for arg in self.__arguments ])
+        arguments.extend([ Fore.RED + arg + reset for arg in self.__output ])
+        if self.yes:
+            arguments.extend([ Style.BRIGHT + "-y" + reset])
+        return " ".join(arguments)
+
     def build(self) -> list[str]:
         arguments = [self.__ffmpeg_bin]
         arguments.extend(self.__inputs)
@@ -303,7 +345,7 @@ if OUTPUT_RENAME_PATTERN.get("pattern") is None or OUTPUT_RENAME_PATTERN.get("re
     raise KeyError("check your OUTPUT_RENAME_PATTERN")
 
 for episode, languages in related_episodes.items():
-    ffmpeg = FFmpeg(yes=FFMPEG_YES)
+    ffmpeg = FFmpeg(yes=FFMPEG_YES, colored_echo=colored_ffmpeg)
     counter = Counters(video=0, audio=0, subtitle=0)
     
     # get video track
@@ -317,11 +359,7 @@ for episode, languages in related_episodes.items():
         print(f"{episode}: no video file found")
         break
 
-    ffmpeg = (
-        ffmpeg
-        .input(video_track)
-        .option("map", f"{counter.total()}:v:0")
-    )
+    ffmpeg = ffmpeg.input(video_track).option("map", f"{counter.total()}:v:0")
     counter.update_video()
     
     # get audio or audio from video per language
@@ -360,15 +398,19 @@ for episode, languages in related_episodes.items():
     
     # get output file
     output_file = OUTPUT_FOLDER / re.sub(**OUTPUT_RENAME_PATTERN, string=video_track.name)
+    output_options = {"c:v": "copy", "c:a": "copy"}
     if counter.get_subtitle() > 0:
+        output_options["c:s"] = "srt"
         output_file = output_file.with_suffix(".mkv")
-
-    ffmpeg = ffmpeg.output(output_file, {"c:v": "copy", "c:a": "copy", "c:s": "srt?"})
-
+        
+    ffmpeg = ffmpeg.output(output_file, output_options)
     print(f"{episode}: output as", str(output_file))
 
     # execute ffmpeg
-    print(f"{episode}:\n", " ".join(ffmpeg.build()))
+    print(f"{episode}:\n", ffmpeg.echo())
+
     if FFMPEG_EXECUTE:
         ffmpeg.execute()
+    else:
+        print("skipped ffmpeg execution, or set FFMPEG_EXECUTE to True")
 
