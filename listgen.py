@@ -286,9 +286,9 @@ class Interval:
         )
     
     def __contains__(self, value: Any) -> bool:
-        return self.is_in_interval(value)
+        return self.contains(value)
     
-    def is_in_interval(self, value: Any) -> bool:
+    def contains(self, value: Any) -> bool:
         # always in range without bounding
         if self.__interval_type == "open":
             return True
@@ -662,31 +662,33 @@ class Conditional:
         return self.is_true()
     
     def is_true(self, *, jellyfin: Optional[Jellyfin] = None, user_id: Optional[str] = None) -> bool:
-        self.__logger.debug("check conditional '%s'", self.name)
+        self.__logger.debug("check conditional: %s", self.name)
 
-        if self.conditions.get("disabled", False):
+        if self.conditions.get("disabled", False):          # always disables the entry, ignoring all other conditions
             return False
+        elif self.conditions.get("selected", False):        # always selects the entry, ignoring all other conditions
+            return True
         
-        elif (hours := self.conditions.get("hours")) is not None:         # from hour 0 to 23
-            if not Interval(hours).is_in_interval(dt.datetime.now().hour):
+        if (hours := self.conditions.get("hours")) is not None:             # from hour 0 to 23
+            if not Interval(hours).contains(dt.datetime.now().hour):
                 return False
-        elif (weekdays := self.conditions.get("weekdays")) is not None:   # from monday=1 to sunday=7
-            if not Interval(weekdays).is_in_interval(dt.datetime.now().isoweekday()):
+        elif (weekdays := self.conditions.get("weekdays")) is not None:     # from monday=1 to sunday=7
+            if not Interval(weekdays).contains(dt.datetime.now().isoweekday()):
                 return False
-        elif (days := self.conditions.get("days")) is not None:           # from 1st day of the month up to max 31st day
-            if not Interval(days).is_in_interval(dt.datetime.now().day):
+        elif (days := self.conditions.get("days")) is not None:             # from 1st day of the month up to 31st day
+            if not Interval(days).contains(dt.datetime.now().day):
                 return False
-        elif (weeks := self.conditions.get("weeks")) is not None:         # from 1st week of the year up to max 52nd week
-            if not Interval(weeks).is_in_interval(dt.datetime.now().isocalendar()[1]):
+        elif (weeks := self.conditions.get("weeks")) is not None:           # from 1st week of the year up to 52nd week
+            if not Interval(weeks).contains(dt.datetime.now().isocalendar()[1]):
                 return False
-        elif (months := self.conditions.get("months")) is not None:       # from january=1 to december=12
-            if not Interval(months).is_in_interval(dt.datetime.now().month):
+        elif (months := self.conditions.get("months")) is not None:         # from january=1 to december=12
+            if not Interval(months).contains(dt.datetime.now().month):
                 return False
-        elif (years := self.conditions.get("years")) is not None:         # from year 1 AD up to year 9999 AD 
-            if not Interval(years).is_in_interval(dt.datetime.now().year):
+        elif (years := self.conditions.get("years")) is not None:           # from year 1 AD up to year 9999 AD 
+            if not Interval(years).contains(dt.datetime.now().year):
                 return False
-        elif (dates := self.conditions.get("dates")) is not None:         # date format YYYY_MM_DD
-            if not Interval(dates).is_in_interval(dt.datetime.now()):
+        elif (dates := self.conditions.get("dates")) is not None:           # date format YYYY_MM_DD
+            if not Interval(dates).contains(dt.datetime.now()):
                 return False
         
         # check conditions that require communication with jellyfin to get user data
@@ -699,7 +701,7 @@ class Conditional:
                     # extract age from parental rating label
                     # TODO: support all jellyfin ratings correctly
                     parental_rating_num = int(re.findall(r"[0-9]+", f"0{max_parental_rating}")[0])
-                    if not Interval(user_age).is_in_interval(parental_rating_num):
+                    if not Interval(user_age).contains(parental_rating_num):
                         return False
     
         self.__logger.debug("conditional '%s' is true", self.name)

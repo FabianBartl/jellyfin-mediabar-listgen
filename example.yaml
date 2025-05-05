@@ -1,0 +1,109 @@
+selection:
+  - name: halloween movies
+    days: 31
+    months: 10
+
+  - name: christmas movies
+    days: 20-26
+    months: 12
+
+  - name: mid rated on friday the 13th
+    weekdays: 5
+    days: 13
+  
+
+  - name: latest
+    # disabled: true
+
+  - name: featured for kids
+    user_age: -13
+
+  - name: featured
+
+
+
+playlists:
+  - name: halloween movies
+    sort_by: Name
+    items:
+      type: dynamic
+      limit: 10
+      include:
+        tags: halloween
+        genres: mystery, crime, thriller
+        library_ids: 7a2175bccb1f1a94152cbd2b2bae8f6d   # movies lib
+
+  - name: christmas movies
+    sort_by: Name
+    items:
+      type: dynamic
+      limit: 10
+      include:
+        tags: christmas
+        genres: comedy, family
+        library_ids: 7a2175bccb1f1a94152cbd2b2bae8f6d   # movies lib
+
+  - name: mid rated on friday the 13th
+    sort_by: CommunityRating
+    sort_ascending: false
+    items:
+      type: dynamic
+      limit: 10
+      include:
+        community_rating: 5-7.5
+        critic_rating: 50-75
+        library_ids: 7a2175bccb1f1a94152cbd2b2bae8f6d, 43cfe12fe7d9d8d21251e0964e0232e2   # movies and series lib
+      exclude:
+        item_types: Episode
+
+
+  - name: featured for kids
+    sort_by: Name
+    items:
+      type: static
+      ids:
+        - c8d5976a20521b1ec16f9ee194a8af21    # spiderman
+        - 2f0fe3e99b96b08ec40dfd221cf6f3e7    # big hero 6
+        - e4927abf7601fdac27e70cbb7e4b8092    # paddington
+        - 6fd2aba01ec88eb4c2949acd9a61582e    # the lego movie
+        - 78a26281eedef555083396f3745a6a52    # rise of the guardians
+
+  - name: featured
+    sort_by: Name
+    items:
+      type: static
+      ids:
+        - 74b4484284a4dca6400b08edf3866053    # the godfather
+        - d139b08fb71938d33a3eff45eb1cecc0    # matrix
+        - 6cdca84774c614abc925476cf16215a6    # inception
+        - f2aacf8048b6323c1e770a8ef503b118    # babylon berlin
+        - 12cbbc1022bb7810d0bfd7509e66ea0c    # ballon
+
+
+  - name: way to long
+    sort_by: Name
+    items:
+      type: dynamic
+      include:
+        runtime: 170-           # longer than 150 minutes (2 hours 50 minutes)
+  
+  - name: latest
+    sort_by: DateCreated
+    sort_ascending: false
+    items:
+      type: dynamic
+      limit: 10
+      exclude:
+        item_types: Episode
+        library_ids: 3862c9622408b2bb528d4603737113a4, dc9531519b809a4d79d060d3056f3e1a   # pre-roll libs
+
+  - name: all
+    sort_by: random
+    items:
+      type: dynamic
+      limit: 20                 # default limit is 10, null disables the limit (not recommended!)
+      include:
+        item_types: Movie, Series
+      exclude:
+        library_ids: 3862c9622408b2bb528d4603737113a4, dc9531519b809a4d79d060d3056f3e1a   # pre-roll libs
+

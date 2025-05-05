@@ -1,6 +1,6 @@
 selection:
   - name: top 5 thrillers of the 90s          # the lowercase name is matched
-    disabled: false              # entry can be easily disabled
+    disabled: true              # entry can be easily disabled
     hours: 22 - 3               # and it is currently between 10pm and 3am, this playlist will be selected
   
   - name: Featured
@@ -17,9 +17,9 @@ selection:
 
 playlists:
   - name: Featured
-    sort_by: Name                            # default: order; possible values: random, order, ProductionYear, Name
+    sort_by: Name                             # default: order; possible values: random, order, ProductionYear, Name
     sort_ascending: true                      # default: true; descending sorting order when false
-    sort_strict: true                        # default: false, if false and sorting key does not exist, a suitable alternative sorting key is used 
+    sort_strict: true                         # default: false, if false and sorting key does not exist, a suitable alternative sorting key is used 
     items:
       type: static
       ids:
